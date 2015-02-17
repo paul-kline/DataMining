@@ -1,8 +1,10 @@
 {-#LANGUAGE TypeSynonymInstances, FlexibleInstances, ViewPatterns #-}
 module LEM1 where
 
+import System.IO 
 import Prelude hiding (id)
 import Data.List
+import Data.Text
 import Control.Monad (join)
 columnName = ["Size", "Color", "Feel", "Temperature", "Attitude"]
 

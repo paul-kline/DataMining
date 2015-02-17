@@ -2,16 +2,143 @@
 module DataMiningTypes where
 
 import Prelude hiding (id)
-import Text.Read
+import Text.Read hiding (get)
 import Data.List
 import Control.Monad
+import Control.Monad.State
+import System.IO
+import qualified Data.Text as Text
 --import Monad.StateT
 
+type MyStateTMonad a = StateT DataMiningState IO a 
 
+data DataMiningState = DataMiningState {
+                            tableState :: Table
+                          } deriving (Show, Eq)
 
+runEvaluate ::  String ->IO (Either String (String, DataMiningState))
+runEvaluate fileLoc= do
+   handle <- openFile fileLoc ReadMode
+   contents <- hGetContents handle
+   let linels = lines contents
+   if (length linels) < 3 
+    then  do 
+      let str = "ERROR: input file is too short!"
+      putStrLn str
+      return (Left str) 
+    else do
+     let (l1:l2:l3:rest) = linels
+     case (readMaybe l1 :: Maybe Int) of
+       Nothing        -> do 
+         let str = "ERROR: Unable to read first line: " ++ l1 ++ " as Int (number of decisions)" 
+         putStrLn str 
+         return (Left str)
+       (Just numDecs) -> do
+          let typesinStrLS = map Text.unpack $ Text.split (==',') (Text.pack l2)          
+          let maybes = map readMaybe typesinStrLS
+          let maybeLS = sequence maybes
+          case maybeLS of
+            Nothing      -> do 
+              let str = "ERROR: Unable to read second line as TypeIndicators"
+              putStrLn str 
+              return (Left str)
+            (Just types) -> do 
+              --rest :: [Text]
+              let rest' = map (map Text.unpack) (map (Text.split (==',')) (map Text.pack rest))
+              eitherTable <- mkTable (map Text.unpack (Text.split (==',') (Text.pack l3))) types numDecs rest'              
+              case eitherTable of
+                (Left err)    -> do 
+                  putStrLn err
+                  return (Left err)
+                (Right table) -> do
+                  let s0 =  DataMiningState table                   
+                  result <- runStateT (evaluate) s0
+                  return $ Right result
 
+runEvaluate' :: Table ->IO (String , DataMiningState)
+runEvaluate' table = do
+   let s0 = DataMiningState table
+   runStateT (evaluate) s0
 
+evaluate :: MyStateTMonad String
+evaluate = do
+  consistencyofData <- checkTableConsistency 
+  case consistencyofData of
+    False -> return "inconsistent data"
+    True -> do
+      lem1rules <- lem1
+      return "nothing"
+  return "hello"
 
+lem1 :: MyStateTMonad [Rule]
+lem1 = do
+        s <- get
+        let table = tableState s
+        let headerPairs = tableHeaders table
+        let decisions = extractFromHeaders headerPairs Decision
+        -- :: [[MaybeValues]]
+        x <- sequence (map getUniqueValuesFor decisions) --unique vals for each decision column
+        --decision, domain pairs
+        let decDomPairs = zip decisions x 
+        sequence $ map computeLEM1RulesForDecisionColumm decDomPairs
+        
+
+computeLEM1RulesForDecisionColumm :: (String, [Maybe Value] -> MyStateTMonad [Rule]
+computeLEM1RulesForDecisionColumm (_, []) = []        
+computeLEM1RulesForDecisionColumm (dec, ls) = sequence $ map (computeLEM1RulesForDecValue dec) ls 
+
+computeLEM1RulesForDecValue :: String -> Maybe Value -> MyStateTMonad [Rule]
+computeLEM1RulesForDecValue decCol maybeValue = do
+                                    s <- get
+                                    let table = tableState s 
+                                    case maybeValue of 
+                                        Nothing    -> putStrLn $ "ERROR: attempt to compute rule 'Nothing' value in decision domain: " ++ decCol
+                                        (Just val) -> do 
+                                          let decPar = decisionPart table decCol  val 
+                                          let goodPart = head decPar
+                                          let allAtts = extractFromHeaders headerPairs Attribute
+                                          computeLem1RulesThatCover goodPart allAtts
+                                          
+computeLem1RulesThatCover :: [Int] -> [String] > MyStateTMonad [Rule]                                          
+getUniqueValuesFor :: String -> MyStateTMonad [Maybe Value]
+getUniqueValuesFor header = do
+  s <- get
+  let table = tableState s
+  let headerPairs = tableHeaders table
+  let rows = tableData table
+  let allMbVals = map (getMVal headerPairs header ) rows
+  return $ removeDuplicates allMbVals
+  
+removeDuplicates :: (Eq a) => [a] -> [a]
+removeDuplicates [] = []
+removeDuplicates (x:xs) = if x `elem` xs then removeDuplicates xs
+                                         else x : (removeDuplicates xs)
+  
+checkTableConsistency :: MyStateTMonad Bool
+checkTableConsistency = do
+    s <- get
+    let table = tableState s
+    let headerPairs = tableHeaders table 
+    let attributes = extractFromHeaders headerPairs Attribute
+    let decisions = extractFromHeaders headerPairs Decision
+    let consistencies = map (checkDecConsistency table attributes) decisions
+    case and consistencies of
+      False -> do 
+        liftIO (putStrLn ("ERROR: The Table has inconsistent data in the following partitions:\n" ++ (join (map (\(b,d) -> if b then "" else d) (zip consistencies decisions)))))
+        return False
+      True -> do
+        liftIO $ putStrLn "DATA CONSISTENT"
+        return True       
+    
+    
+checkDecConsistency :: Table -> [String] -> String  -> Bool
+checkDecConsistency table attributes decision =((compPartG table attributes) <== (compPartG table [decision]))
+    
+extractFromHeaders :: [Header] -> AttDec -> [String]
+extractFromHeaders [] _ = []
+extractFromHeaders (h:hs) attdec = if (snd h) == attdec then (fst h):(extractFromHeaders hs attdec) 
+                                                        else extractFromHeaders hs attdec
+    
 typpes = [StringT, StringT, StringT, StringT, StringT]
 heads = ["Size", "Color", "Feel", "Temperature", "Attitude"]
 
@@ -58,7 +185,7 @@ data AttDec = Attribute
  
 data TypeIndicator = IntT
                    | StringT
-                   | BoolT
+                   | BoolT deriving (Show, Eq, Ord, Read)
                    
 type Row = (Int, [Maybe Value])
 id :: Row -> Int
