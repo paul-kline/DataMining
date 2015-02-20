@@ -67,6 +67,7 @@ evaluate = do
     False -> return "inconsistent data"
     True -> do
       lem1rules <- lem1
+      liftIO $ sequence $ map (putStrLn . show) lem1rules
       return "nothing"
   return "hello"
 
@@ -77,29 +78,79 @@ lem1 = do
         let headerPairs = tableHeaders table
         let decisions = extractFromHeaders headerPairs Decision
         -- :: [[MaybeValues]]
-        x <- sequence (map getUniqueValuesFor decisions) --unique vals for each decision column
+        --x <- sequence (map getUniqueValuesFor decisions) --unique vals for each decision column
         --decision, domain pairs
-        let decDomPairs = zip decisions x 
-        sequence $ map computeLEM1RulesForDecisionColumm decDomPairs
-        
+        --let decDomPairs = zip decisions x 
+        xss <- sequence $ map computeLEM1RulesForDecisionColumm decisions
+        return $ join xss 
 
-computeLEM1RulesForDecisionColumm :: (String, [Maybe Value] -> MyStateTMonad [Rule]
-computeLEM1RulesForDecisionColumm (_, []) = []        
-computeLEM1RulesForDecisionColumm (dec, ls) = sequence $ map (computeLEM1RulesForDecValue dec) ls 
-
-computeLEM1RulesForDecValue :: String -> Maybe Value -> MyStateTMonad [Rule]
-computeLEM1RulesForDecValue decCol maybeValue = do
+computeLEM1RulesForDecisionColumm :: String -> MyStateTMonad [Rule]
+--computeLEM1RulesForDecisionColumm decCol = []        
+computeLEM1RulesForDecisionColumm decCol = do
+                                s <- get
+                                let table = tableState s
+                                uniqueValsForColumn <- getUniqueValuesFor decCol
+                                let noMaybiesVals = noMaybies uniqueValsForColumn
+                                xss <- sequence $ map (computeLEM1RulesForDecValue decCol) noMaybiesVals 
+                                return $ join xss 
+noMaybies :: [Maybe a] -> [a]
+noMaybies [] = []
+noMaybies (x:xs) = case x of
+                     Nothing -> noMaybies xs
+                     Just v  -> v: (noMaybies xs)
+                     
+computeLEM1RulesForDecValue :: String -> Value -> MyStateTMonad [Rule]
+computeLEM1RulesForDecValue decCol val = do
                                     s <- get
-                                    let table = tableState s 
-                                    case maybeValue of 
-                                        Nothing    -> putStrLn $ "ERROR: attempt to compute rule 'Nothing' value in decision domain: " ++ decCol
-                                        (Just val) -> do 
-                                          let decPar = decisionPart table decCol  val 
-                                          let goodPart = head decPar
-                                          let allAtts = extractFromHeaders headerPairs Attribute
-                                          computeLem1RulesThatCover goodPart allAtts
+                                    let table = tableState s
+                                    let headerPairs = tableHeaders table 
+                                    let decPar = decisionPart table decCol val 
+                                    let goodPart = head decPar
+                                    let allAtts = extractFromHeaders headerPairs Attribute                              
+                                    computeLem1RulesThatCover goodPart allAtts decCol val 
                                           
-computeLem1RulesThatCover :: [Int] -> [String] > MyStateTMonad [Rule]                                          
+computeLem1RulesThatCover :: [Int]-> [String] -> String -> Value -> MyStateTMonad [Rule]
+computeLem1RulesThatCover [] _ _ _= return []
+computeLem1RulesThatCover leftToCover@(x:xs) attributes decCol decVal= do
+  s <- get
+  let table = tableState s
+  let headerPairs = tableHeaders table
+  let rows = tableData table              
+  let row1 =  findRWithID rows x  
+  let rule = mkRuleFromAttsAndRow headerPairs attributes row1 decCol
+  rule' <- reduceRule rule
+  let covered = ruleCovers table rule'
+  let leftToCover' = leftToCover `setMinus` covered
+  moreRules <- computeLem1RulesThatCover leftToCover' attributes decCol decVal 
+  return (rule' : moreRules)
+  
+  
+setMinus ::(Eq a) => [a] -> [a] -> [a]
+setMinus [] _ = []
+setMinus xs [] = xs
+setMinus (x:xs) ms = if x `elem` ms then setMinus xs ms 
+                                    else x : (setMinus xs ms)
+reduceRule :: Rule -> MyStateTMonad Rule
+reduceRule r@(Rule (x:[]) p) = return r --one attribute, can't reduce 
+reduceRule r@(Rule avps (decCol,decVal)) = do
+                                        s <- get
+                                        let table = tableState s 
+                                        let headers = tableHeaders table 
+                                        --let covered = ruleCovers table r 
+                                        let decPar = decisionPart table decCol decVal
+                                        let goodPart = head decPar
+                                        let avps' = dropAttsICan table goodPart avps  
+                                        return $ Rule avps' (decCol, decVal)
+                                        
+dropAttsICan :: Table -> [Int] -> [(String,Value)] -> [(String,Value)]       
+dropAttsICan _ _ [] = []
+dropAttsICan table goodPart (avp:avps) = let covering = attribValPairsCover table avps in 
+                                           if covering `isSubSet` goodPart 
+                                             then dropAttsICan table goodPart avps --then it's totally cool to be rid of it 
+                                            else avp : (dropAttsICan table goodPart avps)  -- need attribute 
+                                            
+                                            
+  
 getUniqueValuesFor :: String -> MyStateTMonad [Maybe Value]
 getUniqueValuesFor header = do
   s <- get
@@ -339,16 +390,35 @@ isSubSet (x:xs) s = if x `elem` s  then isSubSet xs s
                                    else False
 
 data Rule = Rule [(String,Value)] (String,Value)
+mkRuleFromAttsAndRow :: [Header] -> [String] ->Row -> String  -> Rule
+mkRuleFromAttsAndRow heads atts row decTitle= let row' = snd row in
+                                        let maybeVals = map ((flip (getMVal heads)) row) atts in
+                                          let zippedWithMaybes = zip atts maybeVals in
+                                            let ruleReady = removeNothings_pair zippedWithMaybes in
+                                              case getMVal heads decTitle row of
+                                                Nothing -> Rule ruleReady (decTitle, BoolVal False)  --I put something so this typechecks... Not sure how to actually handle this.
+                                                Just dv -> Rule ruleReady (decTitle, dv)
+                                              
+removeNothings_pair :: [(a, Maybe b)] -> [(a,b)]                                              
+removeNothings_pair [] = []
+removeNothings_pair (x:xs) = case snd x of
+                                Nothing -> removeNothings_pair xs
+                                Just v  -> (fst x, v): removeNothings_pair xs 
+                                
 ruleSize_Big_Color_Yellow_Feel_Hard = Rule [("Size", (StrVal "big")),("Color",(StrVal "yellow")),("Feel",(StrVal "hard"))] ("Attitude",(StrVal "negative"))
 
 instance Show Rule where
  show (Rule pairLS pair) = "[ ==" ++ (join (intersperse ", ==" (map (show . snd) pairLS))) ++ "] ==> " ++ ( show (snd pair))
  
 ruleCovers :: Table -> Rule -> [Int]
-ruleCovers table (Rule pairls decPair) = let extractors = map fst pairls in
-                                            let shoulbes = map (Just . snd) pairls in
-                                               join (map (\row -> if (getValsG (tableHeaders table) extractors row ) == shoulbes then [(id row)]
-                                                                                        else []) (tableData table))
+ruleCovers table (Rule pairls decPair) = attribValPairsCover table pairls
+
+attribValPairsCover :: Table -> [(String, Value)] -> [Int]
+attribValPairsCover table pairls =  let extractors = map fst pairls in
+                                       let shoulbes = map (Just . snd) pairls in
+                                          join (map (\row -> if (getValsG (tableHeaders table) extractors row ) == shoulbes 
+                                                               then [(id row)]
+                                                               else []) (tableData table))                                                                                       
 ruleIsConsistent :: Table -> Rule -> Bool
 ruleIsConsistent table r@(Rule pairls pair) = let covers = ruleCovers table r in
                                                        let betterBeInThisPart = head $ decisionPart table (fst pair) (snd pair) in
