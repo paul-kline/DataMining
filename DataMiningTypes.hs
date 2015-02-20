@@ -16,26 +16,33 @@ data DataMiningState = DataMiningState {
                             tableState :: Table
                           } deriving (Show, Eq)
 
-runEvaluate ::  String ->IO (Either String (String, DataMiningState))
-runEvaluate fileLoc= do
+trim :: String -> String
+trim ('\t':xs) = trim xs 
+trim (' ':xs) = trim xs
+trim ls = ls 
+                          
+readInTable :: String -> IO (Either String Table)
+readInTable fileLoc = do 
    handle <- openFile fileLoc ReadMode
    contents <- hGetContents handle
    let linels = lines contents
-   if (length linels) < 3 
+   let linels' = map trim linels
+   if (length linels') < 3 
     then  do 
       let str = "ERROR: input file is too short!"
       putStrLn str
       return (Left str) 
     else do
-     let (l1:l2:l3:rest) = linels
+     let (l1:l2:l3:rest) = linels'
      case (readMaybe l1 :: Maybe Int) of
        Nothing        -> do 
          let str = "ERROR: Unable to read first line: " ++ l1 ++ " as Int (number of decisions)" 
          putStrLn str 
          return (Left str)
        (Just numDecs) -> do
-          let typesinStrLS = map Text.unpack $ Text.split (==',') (Text.pack l2)          
-          let maybes = map readMaybe typesinStrLS
+          let typesinStrLS = map Text.unpack $ Text.split (==',') (Text.pack l2)   
+          let typesinStrLS' = map trim typesinStrLS
+          let maybes = map readMaybe typesinStrLS'
           let maybeLS = sequence maybes
           case maybeLS of
             Nothing      -> do 
@@ -45,7 +52,13 @@ runEvaluate fileLoc= do
             (Just types) -> do 
               --rest :: [Text]
               let rest' = map (map Text.unpack) (map (Text.split (==',')) (map Text.pack rest))
-              eitherTable <- mkTable (map Text.unpack (Text.split (==',') (Text.pack l3))) types numDecs rest'              
+              let rest'' = map (map trim) rest'
+              let headers = (map Text.unpack (Text.split (==',') (Text.pack l3)))
+              let headers' = map trim headers
+              mkTable headers' types numDecs rest'' 
+runEvaluate ::  String ->IO (Either String (String, DataMiningState))
+runEvaluate fileLoc= do
+              eitherTable <- readInTable fileLoc  
               case eitherTable of
                 (Left err)    -> do 
                   putStrLn err
@@ -67,7 +80,10 @@ evaluate = do
     False -> return "inconsistent data"
     True -> do
       lem1rules <- lem1
-      liftIO $ sequence $ map (putStrLn . show) lem1rules
+      s <- get
+      let table = tableState s 
+      let rulesAndCoverings = zip lem1rules (map (ruleCovers table) lem1rules)
+      liftIO $ sequence $ map (putStrLn . show) rulesAndCoverings
       return "nothing"
   return "hello"
 
