@@ -122,9 +122,22 @@ computeLEM1RulesForDecValue decCol val = do
                                     let headerPairs = tableHeaders table 
                                     let decPar = decisionPart table decCol val 
                                     let goodPart = head decPar
-                                    let allAtts = extractFromHeaders headerPairs Attribute                              
-                                    computeLem1RulesThatCover goodPart allAtts decCol val 
+                                    let allAtts = extractFromHeaders headerPairs Attribute  
+                                    let globalCovering = findGlobalCoverFor table decPar allAtts 
+                                    liftIO $ putStrLn $ "GLOBAL COVERING: " ++ (show globalCovering)
+                                    case globalCovering of 
+                                        Just gc -> computeLem1RulesThatCover goodPart gc decCol val
+                                        Nothing -> do 
+                                                     liftIO $ putStrLn ("no freaking global covering for: (" ++ (show decCol) ++ ", " ++ (show val) )
+                                                     return []
+                                     
                                           
+findGlobalCoverFor :: Table -> [[Int]] -> [String] -> Maybe [String]
+findGlobalCoverFor _ _ [] = Nothing
+findGlobalCoverFor table decPar atts = case (compPartG table atts) <== decPar of
+                                            True  -> Just (dropAttsICan' table decPar atts 0)
+                                            False -> Nothing
+                                           
 computeLem1RulesThatCover :: [Int]-> [String] -> String -> Value -> MyStateTMonad [Rule]
 computeLem1RulesThatCover [] _ _ _= return []
 computeLem1RulesThatCover leftToCover@(x:xs) attributes decCol decVal= do
@@ -155,16 +168,23 @@ reduceRule r@(Rule avps (decCol,decVal)) = do
                                         --let covered = ruleCovers table r 
                                         let decPar = decisionPart table decCol decVal
                                         let goodPart = head decPar
-                                        let avps' = dropAttsICan table goodPart avps  
+                                        let avps' = dropAttsICan table goodPart avps 0  
                                         return $ Rule avps' (decCol, decVal)
-                                        
-dropAttsICan :: Table -> [Int] -> [(String,Value)] -> [(String,Value)]       
-dropAttsICan _ _ [] = []
-dropAttsICan table goodPart (avp:avps) = let covering = attribValPairsCover table avps in 
-                                           if covering `isSubSet` goodPart 
-                                             then dropAttsICan table goodPart avps --then it's totally cool to be rid of it 
-                                            else avp : (dropAttsICan table goodPart avps)  -- need attribute 
-                                            
+dropAttsICan' :: Table -> [[Int]] -> [String] -> Int -> [String]
+dropAttsICan' table part atts i | i >= (length atts) = atts -- means we're been through them all 
+                                | otherwise = let withoutI = filter (/= (atts !! i)) atts in
+                                                case (compPartG table withoutI) <== part of
+                                                    True -> dropAttsICan' table part withoutI i 
+                                                    False -> dropAttsICan' table part atts (i + 1)
+                                                    
+dropAttsICan :: Table -> [Int] -> [(String,Value)] -> Int -> [(String,Value)]       
+dropAttsICan table goodPart atts i | i >= (length atts) = atts
+                                   | otherwise = let withoutI = filter (/= (atts !! i)) atts in
+                                                 let covering = attribValPairsCover table withoutI in 
+                                                   if covering `isSubSet` goodPart 
+                                                     then dropAttsICan table goodPart withoutI i --then it's totally cool to be rid of it 
+                                                    else  dropAttsICan table goodPart atts (i+1)  -- need attribute 
+                                                    
                                             
   
 getUniqueValuesFor :: String -> MyStateTMonad [Maybe Value]
