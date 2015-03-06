@@ -1,0 +1,12 @@
+< a x a d x d a a a a x d x >
+[ Size Color Feel Temperature Attitude ]
+big yellow soft low positive
+  big yellow hard high negative 
+medium yellow soft high positive
+ medium blue hard high positive
+  medium blue hard high positive ! comment here!!!! comment comment comment!!!!
+   medium blue soft low negative
+ big blue hard low so-so  
+ ! this whole line is a comment
+        !feirjgeilrgjelgij  feijfeifj 
+big blue hard high so-so   

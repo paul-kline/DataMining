@@ -8,7 +8,7 @@ import Control.Monad
 import Control.Monad.State
 import System.IO
 import qualified Data.Text as Text
-import Data.Function
+import Data.Function  hiding (id)
 
 --import Monad.StateT
 
@@ -22,7 +22,9 @@ trim :: String -> String
 trim ('\t':xs) = trim xs 
 trim (' ':xs) = trim xs
 trim ls = ls 
-                          
+
+
+ 
 readInTable :: String -> IO (Either String Table)
 readInTable fileLoc = do 
    handle <- openFile fileLoc ReadMode
@@ -116,7 +118,7 @@ lem2 = do
         x <- sequence $ map getAllAttributeValuePairsForAtt decisions
         let decValPairs = join x
         let bigGoals = map head (map (\(d,v) -> decisionPart table d v) decValPairs)
-        ruleslsls <- sequence $ map (\g -> computeLEM2WithTableGoal lem2Table g g) bigGoals
+        --ruleslsls <- sequence $ map (\g -> computeLEM2WithTableGoal lem2Table g g) bigGoals
         
         liftIO $ putStrLn $ show (head lem2Table)
         return []
@@ -128,6 +130,7 @@ data LEM2Row = LEM2Row {
                   intersectionsLEM2Row :: [[Int]]
 } deriving (Eq, Ord, Show)
 
+{-
 type Goal = [Int]
 type MasterGoal = [Int]
 computeLEM2WithTableGoal ::  LEM2Table -> MasterGoal -> Goal -> MyStateTMonad [Rule]
@@ -137,9 +140,9 @@ computeLEM2WithTableGoal lem2table masterGoal goal = do
    let biggies = filter (\a -> (length a) == len) intersections
    let chosenOne = if length biggies == 1 
       then head biggies
-      else  
+      else 
    return []
-
+-}
         
 getAllAttributeValuePairs :: MyStateTMonad [(String,Value)]
 getAllAttributeValuePairs = do

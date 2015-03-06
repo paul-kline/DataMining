@@ -1,0 +1,2 @@
+
+I chose to read in the data files as Lazy Text (as versus Haskell Strings). Text is a much more efficient data type when dealing with large files. Additionally, the lazy version means the entire text does not need to be loaded into memory at once (strict Text puts it all in memory at once). 
