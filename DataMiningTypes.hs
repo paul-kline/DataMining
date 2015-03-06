@@ -9,7 +9,7 @@ import Control.Monad.State
 import System.IO
 import qualified Data.Text as Text
 import Data.Function  hiding (id)
-
+import qualified Data.Text.Lazy as L
 --import Monad.StateT
 
 type MyStateTMonad a = StateT DataMiningState IO a 
@@ -332,7 +332,8 @@ data AttDec = Attribute
  
 data TypeIndicator = IntT
                    | StringT
-                   | BoolT deriving (Show, Eq, Ord, Read)
+                   | BoolT 
+                   | DoubleT deriving (Show, Eq, Ord, Read)
                    
 type Row = (Int, [Maybe Value])
 id :: Row -> Int
@@ -345,7 +346,8 @@ strRow (i,row) = (show i) ++ "\t" ++ (join (intersperse "\t" (map (\mval -> case
 
 data Value = StrVal String
            | IntVal Int 
-           | BoolVal Bool deriving (Eq, Ord)
+           | BoolVal Bool 
+           | DoubleVal Double deriving (Eq, Ord)
 instance Show Value where
    show (IntVal i) = show i
    show (StrVal str) = str 
@@ -454,11 +456,22 @@ mkRow (t:ts) (i,(x:xs)) =
                                              else Nothing)
                BoolT   -> (case readMaybe x :: Maybe Bool of
                   Nothing  -> Nothing
-                  (Just b) -> (Just (BoolVal b)) ) ) 
+                  (Just b) -> (Just (BoolVal b)) )
+               DoubleT -> (case readMaybe x :: Maybe Double of
+                  Nothing  -> Nothing 
+                  Just d   -> Just (DoubleVal d)) ) 
    in (i,(mVal:(snd (mkRow ts (i,xs)))))
 
                                     
                                                    
+
+rowsSameLengthT :: [[L.Text]] -> Maybe Int
+rowsSameLengthT []     = Just 0
+rowsSameLengthT (x:[]) = Just (length x)
+rowsSameLengthT (x:xs) = case rowsSameLengthT xs of
+                             Nothing    -> Nothing
+                             (Just len) -> if (length x) == len then (Just len)
+                                                                else Nothing                                                   
 
 rowsSameLength :: [[String]] -> Maybe Int
 rowsSameLength []     = Just 0
