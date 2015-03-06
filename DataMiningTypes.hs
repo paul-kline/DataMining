@@ -8,13 +8,15 @@ import Control.Monad
 import Control.Monad.State
 import System.IO
 import qualified Data.Text as Text
+import Data.Function
+
 --import Monad.StateT
 
 type MyStateTMonad a = StateT DataMiningState IO a 
 
 data DataMiningState = DataMiningState {
                             tableState :: Table
-                          } deriving (Show, Eq)
+                     } deriving (Show, Eq)
 
 trim :: String -> String
 trim ('\t':xs) = trim xs 
@@ -84,6 +86,9 @@ evaluate = do
       let table = tableState s 
       let rulesAndCoverings = zip lem1rules (map (ruleCovers table) lem1rules)
       liftIO $ sequence $ map (putStrLn . show) rulesAndCoverings
+      liftIO $ putStrLn "LEM2 BEGIN~~~~~~~~~~~~~~~~~~~"
+      lem2rules <-lem2
+      
       return "nothing"
   return "hello"
 
@@ -99,7 +104,57 @@ lem1 = do
         --let decDomPairs = zip decisions x 
         xss <- sequence $ map computeLEM1RulesForDecisionColumm decisions
         return $ join xss 
+lem2 :: MyStateTMonad [Rule]
+lem2 = do
+        s <- get
+        let table = tableState s 
+        attValLS <- getAllAttributeValuePairs
+        let attValBlocks = map (\av -> attribValPairsCover table [av]) attValLS
+        let lem2Table = map (\(av,block) -> LEM2Row av block []) (zip attValLS attValBlocks)
+        let headerPairs = tableHeaders table
+        let decisions =  extractFromHeaders headerPairs Decision
+        x <- sequence $ map getAllAttributeValuePairsForAtt decisions
+        let decValPairs = join x
+        let bigGoals = map head (map (\(d,v) -> decisionPart table d v) decValPairs)
+        ruleslsls <- sequence $ map (\g -> computeLEM2WithTableGoal lem2Table g g) bigGoals
+        
+        liftIO $ putStrLn $ show (head lem2Table)
+        return []
 
+type LEM2Table = [LEM2Row]                  
+data LEM2Row = LEM2Row {
+                  attValLEM2Row :: (String,Value),
+                  blockLEM2Row  :: [Int],
+                  intersectionsLEM2Row :: [[Int]]
+} deriving (Eq, Ord, Show)
+
+type Goal = [Int]
+type MasterGoal = [Int]
+computeLEM2WithTableGoal ::  LEM2Table -> MasterGoal -> Goal -> MyStateTMonad [Rule]
+computeLEM2WithTableGoal lem2table masterGoal goal = do
+   let intersections = map (\row -> intersect (blockLEM2Row row) goal) lem2table
+   let len = length $ maximumBy (compare `on` length) intersections
+   let biggies = filter (\a -> (length a) == len) intersections
+   let chosenOne = if length biggies == 1 
+      then head biggies
+      else  
+   return []
+
+        
+getAllAttributeValuePairs :: MyStateTMonad [(String,Value)]
+getAllAttributeValuePairs = do
+   s <- get 
+   let table = tableState s
+   let headerPairs = tableHeaders table 
+   let allAtts = extractFromHeaders headerPairs Attribute  
+   lls <- sequence ( map getAllAttributeValuePairsForAtt allAtts )
+   return $ join lls
+   
+getAllAttributeValuePairsForAtt ::String -> MyStateTMonad [(String,Value)]
+getAllAttributeValuePairsForAtt str = do 
+  u <- getUniqueValuesFor str 
+  return (zip (repeat str) (noMaybies u))
+  
 computeLEM1RulesForDecisionColumm :: String -> MyStateTMonad [Rule]
 --computeLEM1RulesForDecisionColumm decCol = []        
 computeLEM1RulesForDecisionColumm decCol = do
@@ -114,7 +169,9 @@ noMaybies [] = []
 noMaybies (x:xs) = case x of
                      Nothing -> noMaybies xs
                      Just v  -> v: (noMaybies xs)
-                     
+
+
+                                                     
 computeLEM1RulesForDecValue :: String -> Value -> MyStateTMonad [Rule]
 computeLEM1RulesForDecValue decCol val = do
                                     s <- get
