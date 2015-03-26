@@ -6,76 +6,124 @@ import DataMiningTypes hiding (evaluate)
 import Control.Exception
 import qualified Data.Text.Lazy.IO as LIO
 import qualified Data.Text.Lazy as L
+import Data.Char
+import Control.Monad
+import TableMaker
+import DataMiningTypes
+import DataMiningTools
+import Control.Monad.State
+import Data.List 
 hw1 = "hw1datLERS.txt"
 
 main :: IO ()
 main = do
-  mH <- getFileName
-  case mH of
-     Nothing -> do
-       putStrLn "Goodbye!\n"
+  eitherTable <- askAndCreateTable
+  case eitherTable of 
+    Left err -> do
+     putStrLn err 
+     putStrLn "Exiting"
+    Right table -> do 
+     putStrLn (show table)
+     putStrLn "Your file is acceptable." 
+     mmethod <- chooseDiscMethod
+     case mmethod of 
+      Nothing -> do
+       putStrLn "Goodbye!"
        return ()
-     Just h  -> do 
-       contents <- LIO.hGetContents h
-       let linels = L.lines contents
-       let linels' = removeCommentsAndTrailingWhites linels 
-       let eitherTable = mkTableFromLERS linels'
-       print linels'
-       print eitherTable
-       --let linels'' = map trim linels'
-  return ()
+      Just m -> do
+       putStrLn $ "Method: " ++ (show m)
+       case m of 
+        'a' -> do 
+         let s0 = DataMiningState table
+         let dec = head $ extractFromHeaders ( tableHeaders table ) Decision
+         (t,s) <- runStateT (performEqualWidthDisc dec) s0 
+         putStr $ show t
+         return ()
+        'b' -> do 
+         return ()
+        'c' -> do 
+         return ()
+         
+performEqualWidthDisc :: String -> MyStateTMonad Table 
+performEqualWidthDisc dec = do 
+  s <- get
+  let table = tableState s 
+      headerPairs = tableHeaders table
+      attributes = extractFromHeaders headerPairs Attribute
+      t' = discretizeTable table attributes EqualWidth 2
+      (x,y) = l t' dec 
+  if x == y then return t'
+   else do 
+                  
+    return t'
+  
+discretizeTable :: Table -> [String] -> IntervalMethod -> Int -> Table  
+discretizeTable table attributes EqualWidth k = let columnValsLS = map (getColumnValsNoMabies' table) attributes in
+  let columnMValsLS = map (extractColumn' table) attributes
+      decisionColumns = map (extractColumn' table) (extractFromHeaders (tableHeaders table) Decision)
+   -- oldColumnAndCutPoints :: [([Maybe Value], [(Double,Double)]]    (header,[cutpoints])
+      oldColumnAndCutPoints =zip columnMValsLS (map (calcEqualWidthIntervals k) columnValsLS)
+      newColumns = (map (\(old, cuts) -> discretizeColumn old cuts) oldColumnAndCutPoints) ++ decisionColumns
+      rows = mytranspose newColumns in 
+      replaceRows table rows
 
-mkTableFromLERS :: [L.Text] -> Either String Table
-mkTableFromLERS [] = Left "No lines to read! was the file empty?"
-mkTableFromLERS (ln1:ln2:lns) = let eitherHeaders = mkHeadersLERS ln2 in 
-  case eitherHeaders of 
-   Left err -> Left err 
-   Right headers -> let dat = mkDataLERS (map (\h -> if (snd h) == Attribute 
-                                                             then DoubleT 
-                                                             else StringT) headers) lns in 
-     Left $ "successfully got headers: " ++(show headers) ++ "Here is the data:\n" ++ (show dat)
 
-     
-mkDataLERS :: [TypeIndicator] -> [L.Text]-> [Row]
-mkDataLERS types lins = let lnls = zip [1..] lins in 
-  map (\(i,ln) ->(mkRow types)  (i,(map L.unpack (L.words ln))) ) lnls   
-                           
+discretizeColumn :: [Maybe Value] -> [(Double,Double)] -> [Maybe Value]  
+discretizeColumn [] _ = []
+discretizeColumn a@((Just (StrVal _)):_) _  =  a 
+discretizeColumn a@((Just (BoolVal _)):_) _ =  a
+discretizeColumn column intervals = map (categorize intervals) column 
 
---mkRow :: [TypeIndicator] -> (Int, [String]) -> Row
-
-      
-mkHeadersLERS :: L.Text -> Either String [Header]
-mkHeadersLERS lin = case (L.isPrefixOf "[" lin, L.isSuffixOf "]" lin) of
-                  (False,False) -> Left "ERROR making headers: no '[' found starting second line. No ']' found ending second line"
-                  (False,True)  -> Left "ERROR making headers: No ']' found ending second line"
-                  (True, False) -> Left "ERROR making headers: no '[' found starting second line."
-                  (True,True)   -> let x =(L.stripSuffix "]") lin in 
-                    case x of 
-                      Nothing -> Left "Error making headers: Found '[' and ']' surrounding second line, but somehow failed to remove them. You should never see this error"
-                      Just nosuff -> let mline = L.stripPrefix "[" nosuff in 
-                        case mline of 
-                          Nothing -> Left "Error making headers: Found '[' and ']' surrounding second line, but somehow failed to remove them. You should never see this error"
-                          Just lin' -> let ls = L.words (L.strip lin') in
-                            let attNum = (length ls) - 1 in
-                            Right $ map (\(x,y) -> (L.unpack x,(if y<=attNum then Attribute else Decision))) (zip ls [1..])
-
-removeCommentsAndTrailingWhites :: [L.Text] -> [L.Text]
-removeCommentsAndTrailingWhites [] = []
-removeCommentsAndTrailingWhites (ln:lns) = let x = (L.strip $ L.takeWhile (\c -> c /= '!') ln) in 
-                                             if L.length x == 0 -- we remove lines that are entirely comments
-                                              then     (removeCommentsAndTrailingWhites lns)
-                                              else x : (removeCommentsAndTrailingWhites lns)
-{-Repeatedly asks for a valid file name-}  
-getFileName :: IO (Maybe Handle)  
-getFileName = handle (\(e :: IOException) ->do
-                         print e
-                         putStrLn $ "In other words, try again!\n"
-                         getFileName) $ do
-      putStrLn $ "Please enter the input data file ('q' to quit):"
-      str <- getLine
-      case str of
-       "q" -> return Nothing
-       "Q" -> return Nothing 
-       a@_ -> do 
-         h <- openFile str ReadMode
-         return (Just h)
+categorize :: [(Double,Double)] -> Maybe Value -> Maybe Value 
+categorize intervals (Just (DoubleVal d))  =   let mInterval = find (\pair -> d >= (fst pair) && d <= (snd pair)) intervals in 
+                                        case mInterval of 
+                                           Nothing -> Just $ StrVal "ERROR"
+                                           Just i  ->Just $ StrVal $ (show (fst i)) ++ ".." ++ (show (snd i))
+categorize intervals (Just (IntVal i)) = categorize intervals (Just (DoubleVal (fromIntegral i)))
+categorize _ a@_ = a 
+                                           
+                                   
+calcEqualWidthIntervals :: Int -> [Value] -> [(Double,Double)]
+calcEqualWidthIntervals numintervals columnvals = do 
+  if length columnvals == 0 then []
+  else do
+    let mv = (case head columnvals of 
+         (StrVal _)     -> Nothing 
+         (BoolVal _)    -> Nothing
+         (IntVal i)     -> (Just (fromIntegral i))
+         (DoubleVal d)  -> Just d)
+    case mv of 
+      Nothing -> []
+      Just v  -> do 
+         let max = case maximum columnvals of 
+                     IntVal i -> fromIntegral i
+                     DoubleVal d -> d 
+             min = case minimum columnvals of
+                     IntVal i -> fromIntegral i 
+                     DoubleVal d -> d              
+         let width = (max - min)/((fromIntegral numintervals))
+         map (\(x,y) -> ((min + (fromIntegral x)*width),(min + (fromIntegral y)*width))) (zip [0..numintervals] [1..numintervals])
+chooseDiscMethod :: IO (Maybe Char)
+chooseDiscMethod = do 
+ putStrLn "Please choose your desired global discretization method ('q' to quit):"
+ putStrLn "\t(a) equal interval width"
+ putStrLn "\t(b) equal frequency per interval"
+ putStrLn "\t(c) conditional entropy"
+ putStr $ ": "
+ str <- getLine
+ case str of 
+  "q" -> do
+    --putStrLn "Exiting"
+    return Nothing
+  "Q" -> do
+    --putStrLn "Exiting"
+    return Nothing
+  "a" -> return $ Just 'a'
+  "A" -> return $ Just 'a'      
+  "b" -> return $ Just 'b'
+  "B" -> return $ Just 'b'
+  "c" -> return $ Just 'c'
+  "C" -> return $ Just 'c'
+  _ -> do 
+    putStrLn "INVALID SELECTION.\n"
+    chooseDiscMethod
