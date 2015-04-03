@@ -10,6 +10,7 @@ import System.IO
 import qualified Data.Text as Text
 import Data.Function  hiding (id)
 import qualified Data.Text.Lazy as L
+import Text.Printf
 --import Monad.StateT
 
 type MyStateTMonad a = StateT DataMiningState IO a 
@@ -17,9 +18,13 @@ data IntervalMethod = EqualWidth
                     | EqualFrequency
                   
 data DataMiningState = DataMiningState {
-                            tableState :: Table
+                            tableState :: Table,
+                            discretizingTable :: Maybe Table,
+                            discretizingState :: DiscState
                      } deriving (Show, Eq)
 
+type DiscState = [(String, (Int,[(Double,Double)]) )]
+                 
 type LEM2Table = [LEM2Row]                  
 data LEM2Row = LEM2Row {
                   attValLEM2Row :: (String,Value),
@@ -59,12 +64,14 @@ strRow (i,row) = (show i) ++ "\t" ++ (join (intersperse "\t" (map (\mval -> case
 data Value = StrVal String
            | IntVal Int 
            | BoolVal Bool 
-           | DoubleVal Double deriving (Eq, Ord)
+           | DoubleVal Double 
+           | Interval Double Double deriving (Eq, Ord)
 instance Show Value where
    show (IntVal i) = show i
    show (StrVal str) = str 
    show (BoolVal b) = show b
-   show (DoubleVal d) = show d 
+   show (DoubleVal d) = printf "%.2f" d
+   show (Interval dlow dhigh) = (printf "%.3f" dlow) ++ ".." ++ (printf "%.3f" dhigh)   
 data Rule = Rule [(String,Value)] (String,Value)
 
 ruleSize_Big_Color_Yellow_Feel_Hard = Rule [("Size", (StrVal "big")),("Color",(StrVal "yellow")),("Feel",(StrVal "hard"))] ("Attitude",(StrVal "negative"))

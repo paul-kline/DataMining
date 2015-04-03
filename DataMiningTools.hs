@@ -6,8 +6,10 @@ import Data.List
 import Prelude hiding (id)
 import Control.Monad
 import Control.Monad.State
-
-
+import Data.Text (pack, unpack)
+import Text.Read (readMaybe)
+import Control.Monad
+import System.IO.Unsafe
 runEvaluate ::  String ->IO (Either String (String, DataMiningState))
 runEvaluate fileLoc= do
               eitherTable <- readInTable fileLoc  
@@ -16,13 +18,13 @@ runEvaluate fileLoc= do
                   putStrLn err
                   return (Left err)
                 (Right table) -> do
-                  let s0 =  DataMiningState table                   
+                  let s0 =  DataMiningState table Nothing []                  
                   result <- runStateT (evaluate) s0
                   return $ Right result
 
 runEvaluate' :: Table ->IO (String , DataMiningState)
 runEvaluate' table = do
-   let s0 = DataMiningState table
+   let s0 = DataMiningState table Nothing []
    runStateT (evaluate) s0
 
 evaluate :: MyStateTMonad String
@@ -361,7 +363,17 @@ ruleIsConsistent table r@(Rule pairls pair) = let covers = ruleCovers table r in
 mytranspose :: [[Maybe Value]] ->  [Row]
 mytranspose columnLS = let rowvalsLS = transpose columnLS in 
                         zip [1..] rowvalsLS 
-
+{-
+equalFrequency :: (Ord a) => Int -> [a] -> [[a]]
+equalFrequency _ [] = []
+equalFrequency 1 x = x
+equalFrequency i ls = let ls' = sort ls 
+   -}                       
+occurances :: (Eq a, Num b) => a -> [a] -> b 
+occurances _ [] = 0
+occurances t (x:xs) = if t == x 
+                          then 1 + (occurances t xs)
+                          else occurances t xs 
 replaceRows :: Table ->[Row] -> Table
 replaceRows table newRows = Table (tableHeaders table) newRows
 
@@ -369,6 +381,13 @@ l :: Table -> String -> (Int,Int)
 l table dec = let allatts = extractFromHeaders (tableHeaders table) Attribute in
   let decBlocks = compPartG table [dec] in 
   (sum (map (length . lowerApprox table dec allatts) decBlocks), length (tableData table)) 
+
+isConsistent :: Table -> String -> Bool
+isConsistent t dec = let (x,y) = l t dec in 
+                        x == y
+isConsistent' :: Table -> Bool 
+isConsistent' t = let decs = extractFromHeaders (tableHeaders t) Decision in 
+                    and (map (isConsistent t) decs)
   
 h' :: (Floating a) => Table -> String -> String -> a
 h' table dec att = let blocks = compPartG table [att] in 
@@ -396,7 +415,78 @@ lowerApprox table dec atts set = let a = compPartG table atts in
 upperApprox :: Table -> String -> [String] -> [Int] -> [Int]
 upperApprox table dec atts set = let a = compPartG table atts in
     sort . nub $ foldr (\s acc -> (join (filter (s `elem`) a)) ++ acc) [] set
-                                                        
+    
+    {-
+performMerge :: Table -> Table
+performMerge table = let allPossibleMerges = 
+-}
+
+performPossibleMerges :: Table ->String -> Table
+performPossibleMerges table dec = let colNames = map fst (tableHeaders table)
+                                      colVals = map (getColumnValsNoMabies' table) colNames
+                                      pairs = zip colNames colVals 
+                                      mergables = foldr (\pair acc -> case head (snd pair) of 
+                                                                           (Interval _ _) -> pair : acc 
+                                                                           _              -> acc ) [] pairs
+                                      mergablesSorted = map (\(name,ls) -> (name, sort ls)) mergables
+                                      merges = join $ map (\(n,vals) -> zip (repeat n) (map (\(v1,v2) -> 
+                                        case (v1,v2) of 
+                                          (i1@(Interval l1 h1),i2@(Interval l2 h2)) -> 
+                                            ((i1,i2),Interval l1 h2)) (zip vals (tail vals)))) mergablesSorted
+                                      mergedTable = mergeHelper table dec merges 
+                                  --    xxx = unsafePerformIO $ putStrLn $ "Pairs:\n" ++ (show pairs) ++ "\nMergables:\n" ++ (show mergables) ++ "\nMerges:\n" ++ (show merges)
+                                      in 
+                                 -- case xxx of 
+                                  --  () -> 
+                                  dropSillyColumns mergedTable 
+                                  --merges :: [(String, ((Value,Value),Value))]
+                                  
+dropSillyColumns :: Table -> Table 
+dropSillyColumns table = let headers = tableHeaders table 
+                             atts = extractFromHeaders headers Attribute
+                             colLS = map (extractColumn' table) atts 
+                             pairs = zip atts colLS 
+                             attsToRemove = foldr (\(a,ls) acc -> if length (nub ls) <= 1 then a:acc else acc) [] pairs in 
+                         if length attsToRemove > 0 
+                          then 
+                             let headers' = filter (\(str,ad) -> not ( str `elem` attsToRemove)) headers 
+                                 colLS' = foldr (\(att,colvals) acc -> if (att `elem` attsToRemove) then acc else colvals:acc ) [] pairs
+                                 newRows = mytranspose colLS' in 
+                             Table headers' newRows
+                                 
+                          else table 
+                          
+                         
+mergeHelper :: Table ->String -> [(String,((Value,Value),Value))] -> Table
+mergeHelper table _ [] = table 
+mergeHelper table dec ((col1, ((iv1,iv2), niv1@(Interval nl1 nh1))):xs) = 
+  let t' = mergeValuesInColumn table col1 [Just iv1,Just iv2] (Just niv1)  
+      (x,y) = l t' dec in 
+  if x == y 
+    then 
+     if length xs == 0 
+      then t' 
+      else let (col2, (((Interval l1 h1),q@(Interval l2 h2)),(Interval nl2 nh2)))  = head xs in 
+           if col2 == col1 then --we are dealing with the same column, otherwise no changes necessary
+              let e' = (col2, ( (niv1,q), Interval nl1 nh2)) in 
+              mergeHelper t' dec (e':(tail xs))
+           else mergeHelper t' dec xs 
+    else
+     mergeHelper table dec xs     
+mergeValuesInColumn :: Table -> String -> [Maybe Value] -> Maybe Value -> Table
+mergeValuesInColumn table colName mvs nv = let colvals = extractColumn' table colName
+                                               newcol = map (\mv -> if mv `elem` mvs then nv else mv) colvals
+                                                in
+                                           replaceColumns table [(colName,newcol)]
+                                        
+replaceColumns :: Table -> [(String,[Maybe Value])] -> Table 
+replaceColumns table colNameNewvalsPairs = let rows = tableData table 
+                                               colNames = map fst (tableHeaders table)
+                                               newColumns = map (\cn -> case lookup cn colNameNewvalsPairs of 
+                                                                          Nothing -> extractColumn' table cn 
+                                                                          Just mvs -> mvs) colNames 
+                                               newRows = mytranspose newColumns in 
+                                           replaceRows table newRows 
 table = do 
        tab <- mkTable heads typpes 1 dat
        case tab of
@@ -412,3 +502,9 @@ partTemp = do
 partAttitute = do
             tab <- table
             return $ mySort $ compPartG tab ["Attitude"]    
+            
+combinations :: Int -> [a] -> [[a]]
+combinations 0 _  = [ [] ]
+combinations n xs = [ y:ys | y:xs' <- tails xs
+                           , ys <- combinations (n-1) xs']            
+          
