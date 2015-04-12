@@ -70,7 +70,11 @@ strRow :: Row -> String
 strRow (i,row) = (show i) ++ "\t" ++ (join (intersperse "\t" (map (\mval -> case mval of
                                                         Nothing -> "NUL"
                                                         (Just val) -> show val) row)))
-
+strRow' :: Row -> String 
+strRow' (i,row) = (join (intersperse "\t" (map (\mval -> case mval of
+                                                        Nothing -> "NUL"
+                                                        (Just val) -> show val) row)))
+                                                        
 data Value = StrVal String
            | IntVal Int 
            | BoolVal Bool 

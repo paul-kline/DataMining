@@ -41,12 +41,16 @@ main = do
          let dec = head $ extractFromHeaders ( tableHeaders table ) Decision
          (t,s) <- runStateT (performIntervalDisc EqualWidth dec) s0 
          putStr $ show t
+         --(unit,s') <- runStateT (writeFiles 'a' t) s 
+         writeFiles t
          return ()
         'b' -> do 
          let s0 = DataMiningState table Nothing [] []
          let dec = head $ extractFromHeaders ( tableHeaders table ) Decision
          (t,s) <- runStateT (performIntervalDisc EqualFrequency dec) s0 
          putStr $ show t
+         --(unit,s') <- runStateT (writeFiles 'b' t) s 
+         writeFiles t
          return ()
         'c' -> do 
          let s0 = DataMiningState table Nothing [] []
@@ -63,7 +67,36 @@ main = do
              t' = Table tColHeadersSorted (mytranspose cols)
              t'' = performPossibleMerges t' dec      
          putStr $ show t''
+         --(unit,s') <- runStateT (writeFiles 'c' t'') s 
+         writeFiles t''
          return ()
+writeFiles :: Table -> IO ()
+writeFiles table = do
+  let headers = tableHeaders table 
+      atts = extractFromHeaders headers Attribute 
+      columns = map (\name -> sort ( nub (getColumnValsNoMabies' table name))) atts 
+      attcols = zip atts columns
+      
+      
+  hIntervalFile <- openFile "test.int"  WriteMode
+  hPutStrLn hIntervalFile "Attributes and their discretized intervals:\n"
+  sequence $ map (\(att,colvals) -> case head colvals of 
+                                     (Interval l h) -> do 
+                                       hPutStrLn hIntervalFile $ att ++ ":\t" ++ (join (intersperse ", " (map show colvals)))
+                                     _  -> return ()) attcols    
+  hClose hIntervalFile
+  
+  hTableFile <- openFile "test.data" WriteMode 
+  let letters = join $ map (\(att,ad) -> if ad == Attribute then "a " else "d " ) headers 
+      firstRow = "< " ++ letters ++ ">"
+      colNames = join (intersperse " " ( map fst headers))
+      secondRow = "[ " ++ colNames ++ " ]"
+      rows = tableData table 
+  hPutStrLn hTableFile firstRow
+  hPutStrLn hTableFile secondRow
+  sequence $ map (\row -> hPutStrLn hTableFile (strRow' row)) rows 
+  hClose hTableFile  
+  return ()       
 dominantAttributeStarter ::String -> MyStateTMonad Table
 dominantAttributeStarter dec = do 
   DataMiningState {..} <- get 
