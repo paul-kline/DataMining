@@ -18,13 +18,13 @@ runEvaluate fileLoc= do
                   putStrLn err
                   return (Left err)
                 (Right table) -> do
-                  let s0 =  DataMiningState table Nothing []                  
+                  let s0 =  DataMiningState table Nothing [] []                 
                   result <- runStateT (evaluate) s0
                   return $ Right result
 
 runEvaluate' :: Table ->IO (String , DataMiningState)
 runEvaluate' table = do
-   let s0 = DataMiningState table Nothing []
+   let s0 = DataMiningState table Nothing [] []
    runStateT (evaluate) s0
 
 evaluate :: MyStateTMonad String
@@ -286,7 +286,12 @@ getRow :: Table -> Int -> Row
 getRow table int = findRWithID (tableData table) int
 
 findRWithID :: [Row] -> Int -> Row
-findRWithID rows i = rows !! (i-1)
+findRWithID rows i = case find (\x -> (fst x) == i) rows of 
+                        Nothing -> 
+                          let x = unsafePerformIO $ putStrLn $ "OH NO!!!1" ++ (show rows) ++ (show i) in
+                          case x of 
+                            () -> rows !! (i-1) --should throw exception
+                        Just r -> r 
  {-                                         
 findID :: [Row] -> Int -> Row 
 --findID [] i = Nothing
@@ -363,6 +368,7 @@ ruleIsConsistent table r@(Rule pairls pair) = let covers = ruleCovers table r in
 mytranspose :: [[Maybe Value]] ->  [Row]
 mytranspose columnLS = let rowvalsLS = transpose columnLS in 
                         zip [1..] rowvalsLS 
+                        
 {-
 equalFrequency :: (Ord a) => Int -> [a] -> [[a]]
 equalFrequency _ [] = []
@@ -379,8 +385,12 @@ replaceRows table newRows = Table (tableHeaders table) newRows
 
 l :: Table -> String -> (Int,Int)
 l table dec = let allatts = extractFromHeaders (tableHeaders table) Attribute in
-  let decBlocks = compPartG table [dec] in 
-  (sum (map (length . lowerApprox table dec allatts) decBlocks), length (tableData table)) 
+  let decBlocks = compPartG table [dec] 
+      x = () --unsafePerformIO $ putStrLn $ "Here is decBlocks: " ++ (show decBlocks)
+      in
+   case x of 
+    () ->    
+     (sum (map (length . lowerApprox table dec allatts) decBlocks), length (tableData table)) 
 
 isConsistent :: Table -> String -> Bool
 isConsistent t dec = let (x,y) = l t dec in 

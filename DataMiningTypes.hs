@@ -16,15 +16,25 @@ import Text.Printf
 type MyStateTMonad a = StateT DataMiningState IO a 
 data IntervalMethod = EqualWidth
                     | EqualFrequency
+      --              | DominantAtt
                   
 data DataMiningState = DataMiningState {
                             tableState :: Table,
                             discretizingTable :: Maybe Table,
-                            discretizingState :: DiscState
+                            discretizingState :: DiscState,
+                            getDomAttState    :: DomAttState
                      } deriving (Show, Eq)
 
 type DiscState = [(String, (Int,[(Double,Double)]) )]
-                 
+type DomAttState = [(String, AttInfo)]
+data AttInfo = AttInfo {
+                 getCuts :: [Double],
+                 getIntervals :: [(Double,Double)],
+                 getPossibleCuts :: [Double],
+                 getAttMinimum :: Double,
+                 getAttMaximum :: Double,
+                 getMaxCuts :: Int
+                 } deriving (Show, Eq)
 type LEM2Table = [LEM2Row]                  
 data LEM2Row = LEM2Row {
                   attValLEM2Row :: (String,Value),
