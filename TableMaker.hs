@@ -10,9 +10,8 @@ import Data.Char
 import Control.Monad
 import qualified Data.Text as Text
 import Text.Read
-
-
 t1IO = mkTestTable "lers1.txt"
+
 mkTestTable str = do 
        h <- openFile str ReadMode
        c <- LIO.hGetContents h 

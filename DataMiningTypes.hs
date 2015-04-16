@@ -11,6 +11,7 @@ import qualified Data.Text as Text
 import Data.Function  hiding (id)
 import qualified Data.Text.Lazy as L
 import Text.Printf
+import Data.Function.Memoize
 --import Monad.StateT
 
 type MyStateTMonad a = StateT DataMiningState IO a 
@@ -21,8 +22,10 @@ data IntervalMethod = EqualWidth
 data DataMiningState = DataMiningState {
                             tableState :: Table,
                             discretizingTable :: Maybe Table,
-                            discretizingState :: DiscState,
-                            getDomAttState    :: DomAttState
+            --                discretizingState :: DiscState,
+                            getDomAttState    :: DomAttState,
+                            verbose :: Bool,
+                            stops :: Bool
                      } deriving (Show, Eq)
 
 type DiscState = [(String, (Int,[(Double,Double)]) )]
@@ -46,7 +49,19 @@ data LEM2Row = LEM2Row {
 data Table = Table {
                tableHeaders    :: [Header],
                tableData       :: [Row]
-} deriving (Eq, Ord)
+} deriving (Eq, Ord, Bounded)
+{-
+instance Enum Table where 
+ succ a = a 
+ pred a = a 
+ toEnum _ = Table [] []
+ fromEnum _ = 0
+ enumFromThen a b = [a,b]
+ enumFrom a = [a]
+ enumFromTo a b = [a,b]
+ enumFromThenTo a b c = [a,b,c]
+ -}
+instance Memoizable Table where memoize = memoizeFinite
 
 instance Show Table where
    show (Table headers dattt) = "Table:\n" ++ "ID\t" ++ (join (intersperse "\t" (map fst headers))) ++ "\n" ++ 
@@ -62,7 +77,7 @@ data TypeIndicator = IntT
                    | BoolT 
                    | DoubleT deriving (Show, Eq, Ord, Read)
                    
-type Row = (Int, [Maybe Value])
+type Row = (Int, [Maybe Value]) --deriving (Bounded)
 id :: Row -> Int
 id = fst
 

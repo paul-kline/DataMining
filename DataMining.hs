@@ -16,6 +16,7 @@ import Data.List
 import Data.Function
 import Text.Printf
 import Data.Function.Memoize
+import Text.Printf
 hw1 = "hw1datLERS.txt"
 
 main :: IO ()
@@ -34,28 +35,30 @@ main = do
        putStrLn "Goodbye!"
        return ()
       Just m -> do
-       putStrLn $ "Method: " ++ (show m)
+       --putStrLn $ "Method: " ++ (show m)
+       let s0 = DataMiningState table Nothing [] False False
+       let dec = head $ extractFromHeaders ( tableHeaders table ) Decision         
        case m of 
         'a' -> do 
-         let s0 = DataMiningState table Nothing [] []
-         let dec = head $ extractFromHeaders ( tableHeaders table ) Decision
-         (t,s) <- runStateT (performIntervalDisc EqualWidth dec) s0 
+         (unit,s1) <- runStateT (stateStarter dec) s0 
+         liftIO $ putStrLn $ "Beginning equal width discretization.."
+         (t,s) <- runStateT (performIntervalDisc EqualWidth dec) s1 
          putStr $ show t
          --(unit,s') <- runStateT (writeFiles 'a' t) s 
          writeFiles t
          return ()
         'b' -> do 
-         let s0 = DataMiningState table Nothing [] []
-         let dec = head $ extractFromHeaders ( tableHeaders table ) Decision
-         (t,s) <- runStateT (performIntervalDisc EqualFrequency dec) s0 
+         (unit,s1) <- runStateT (stateStarter dec) s0 
+         liftIO $ putStrLn $ "Beginning equal frequency discretization.."
+         (t,s) <- runStateT (performIntervalDisc EqualFrequency dec) s1 
          putStr $ show t
          --(unit,s') <- runStateT (writeFiles 'b' t) s 
          writeFiles t
          return ()
         'c' -> do 
-         let s0 = DataMiningState table Nothing [] []
-         let dec = head $ extractFromHeaders ( tableHeaders table ) Decision
-         (t,s) <- runStateT (dominantAttributeStarter dec) s0 
+         (unit,s1) <- runStateT (stateStarter dec) s0 
+         liftIO $ putStrLn $ "Beginning dominant attribute discretization.."
+         (t,s) <- runStateT (dominantAttribute dec) s1 
          let orderedHeaders = zip (tableHeaders table) [(1::Int)..]
              tColHeaders = (tableHeaders t)
              tColHeadersSorted = sortBy (\x y -> case (lookup x orderedHeaders,lookup y orderedHeaders) of 
@@ -65,40 +68,16 @@ main = do
                                                 (Just xi,Just yi)  -> compare xi yi) tColHeaders 
              cols = map (\header -> extractColumn' t (fst header)) tColHeadersSorted
              t' = Table tColHeadersSorted (mytranspose cols)
-             t'' = performPossibleMerges t' dec      
-         putStr $ show t''
+         t'' <- performPossibleMerges' t' dec      
+         --putStr $ show t''
          --(unit,s') <- runStateT (writeFiles 'c' t'') s 
          writeFiles t''
          return ()
-writeFiles :: Table -> IO ()
-writeFiles table = do
-  let headers = tableHeaders table 
-      atts = extractFromHeaders headers Attribute 
-      columns = map (\name -> sort ( nub (getColumnValsNoMabies' table name))) atts 
-      attcols = zip atts columns
-      
-      
-  hIntervalFile <- openFile "test.int"  WriteMode
-  hPutStrLn hIntervalFile "Attributes and their discretized intervals:\n"
-  sequence $ map (\(att,colvals) -> case head colvals of 
-                                     (Interval l h) -> do 
-                                       hPutStrLn hIntervalFile $ att ++ ":\t" ++ (join (intersperse ", " (map show colvals)))
-                                     _  -> return ()) attcols    
-  hClose hIntervalFile
+
+
   
-  hTableFile <- openFile "test.data" WriteMode 
-  let letters = join $ map (\(att,ad) -> if ad == Attribute then "a " else "d " ) headers 
-      firstRow = "< " ++ letters ++ ">"
-      colNames = join (intersperse " " ( map fst headers))
-      secondRow = "[ " ++ colNames ++ " ]"
-      rows = tableData table 
-  hPutStrLn hTableFile firstRow
-  hPutStrLn hTableFile secondRow
-  sequence $ map (\row -> hPutStrLn hTableFile (strRow' row)) rows 
-  hClose hTableFile  
-  return ()       
-dominantAttributeStarter ::String -> MyStateTMonad Table
-dominantAttributeStarter dec = do 
+stateStarter ::String -> MyStateTMonad ()
+stateStarter dec = do 
   DataMiningState {..} <- get 
  -- liftIO $ putStrLn "Made it here"
   let headerPairs = tableHeaders tableState
@@ -111,7 +90,7 @@ dominantAttributeStarter dec = do
                                            (att, calcPossibleCuts numbers, min, max)) attributes
       domattState = map (\(att,ls,min,max) -> (att, AttInfo [] [] ls min max (length ls))) att_PosCuts_min_maxLS
   put $ DataMiningState {getDomAttState = domattState, ..}
-  dominantAttribute dec  
+  return () 
   
 calcPossibleCuts :: [Double] -> [Double]
 calcPossibleCuts doubls = map (\(x,y) -> ( x + y ) /2 ) (zip doubls (tail doubls))
@@ -120,7 +99,8 @@ dominantAttribute :: String -> MyStateTMonad Table
 dominantAttribute dec = do 
   DataMiningState {..} <- get
   liftIO ( do 
-    putStrLn $"DomAttState: \n" ++ (show getDomAttState) ++ "\n"
+    if verbose then putStrLn $"DomAttState: \n" ++ (show getDomAttState) ++ "\n"
+               else return ()
     )
   let fixThisTable = case discretizingTable of 
                         Just tf -> tf 
@@ -133,8 +113,11 @@ dominantAttribute dec = do
       namedparts = map (\attparts -> map (\part -> map (\i ->  getMVal headerPairs dec (findRWithID rows i)) part) attparts) partitionsLS
       attHValPairs = zip attributes (map h namedparts)
   maybebestAttwCutChoices <- getBestAttwCutChoices attHValPairs
-  liftIO $ putStrLn $ "Best att: " ++ (show maybebestAttwCutChoices)
-  liftIO $ getLine
+  liftIO (do 
+           if verbose then putStrLn $ "Best att: " ++ (show maybebestAttwCutChoices)
+                      else return ()
+           if stops then getLine else (return [])           
+           )
   --liftIO $ putStrLn "Made it here"
   case maybebestAttwCutChoices of 
    Nothing -> do 
@@ -148,9 +131,11 @@ dominantAttribute dec = do
      --liftIO $ putStrLn "Made it here"
      let cutHpairs = zip cuts hvalues
          bestCutPoint =fst $ minimumBy (compare `on` snd) cutHpairs
-     liftIO ( do
-           putStrLn $ "Best cutPoint for: " ++ att ++ " : " ++ (show bestCutPoint)
-           getLine)
+     liftIO (do 
+           if verbose then putStrLn $ "Best cutPoint for: " ++ att ++ " : " ++ (show bestCutPoint)
+                      else return ()
+           if stops then getLine else (return [])           
+           )
      case lookup att getDomAttState of 
             Nothing -> do 
              let str = "this as well should never ever happen."
@@ -165,19 +150,21 @@ dominantAttribute dec = do
                   attinfo' = AttInfo { getCuts = cuts', getIntervals = intervals', ..}
                   entry = (att,attinfo')
                   domattState' = entry: (deleteBy (\x y -> (fst x) == (fst y)) entry getDomAttState) 
+              DataMiningState {..} <- get 
               liftIO (do 
-                 putStrLn $ "This is the new attState I am trying to add: " ++ (show domattState')
-                 getLine
-                 )
-              put $ DataMiningState {getDomAttState = domattState', ..}
+                    if verbose then putStrLn $ "This is the new attState I am trying to add: " ++ (show domattState')
+                               else return ()
+                    if stops then getLine else (return [])           
+                    )
+              put ( DataMiningState {getDomAttState = domattState', ..})
               DataMiningState {..} <- get  --needed because I'm using recordSyntax. need to reget stuff 
               t <- constructTableFromDomAttState dec 
-              liftIO $ putStrLn $ "Made it here: " ++ (show t) ++ (show (isConsistent t dec))
-              
+              if verbose then liftIO $ putStrLn $ "Made it here: " ++ (show t) ++ (show (isConsistent t dec))
+                         else return ()
               case isConsistent t dec of 
                 True -> return t 
                 False -> do 
-                  liftIO $ putStrLn "Made it here 2 "
+                  --liftIO $ putStrLn "Made it here 2 "
                   let t_headers = tableHeaders t 
                       atts = extractFromHeaders t_headers Attribute 
                       partition = compPartG t atts 
@@ -192,9 +179,9 @@ dominantAttribute dec = do
                       allOrigAtts = extractFromHeaders origHeaders Attribute
                       rows = map (\i -> (i, map (\att -> getMVal origHeaders att (findRWithID (tableData tableState) i)) (allOrigAtts ++ [dec])) ) newTableIDs
                       subTable = Table origHeaders rows
-                  liftIO $ putStrLn $ "subTable: " ++ (show subTable)    
+                  if verbose then liftIO $ putStrLn $ "subTable: " ++ (show subTable)    
+                             else return ()
                   put $ DataMiningState { discretizingTable= Just subTable, ..}
-                  liftIO $ putStrLn $ "Made it here 3"
                   dominantAttribute dec
                   
 constructTableFromDomAttState :: String -> MyStateTMonad Table 
@@ -210,7 +197,8 @@ constructTableFromDomAttState dec = do
       accHeaders = zip attributesThatHaveCuts (repeat Attribute)
       headers = accHeaders ++ decHeaders
       rows' = mytranspose (columns' ++ [(extractColumn' tableState dec)]) --don't forget the dec column!
-  liftIO $ putStrLn $ "Headers to use: " ++ (show headers) ++ "\n Rows to use: " ++ (show rows')
+  if verbose then liftIO $ putStrLn $ "Headers to use: " ++ (show headers) ++ "\n Rows to use: " ++ (show rows')
+             else return ()
   return (Table headers rows')
   
 experimentWithCutPoints :: String ->String -> Double ->MyStateTMonad Double
@@ -276,47 +264,80 @@ performIntervalDisc meth dec = do
   let table = tableState s 
       headerPairs = tableHeaders table
       attributes = extractFromHeaders headerPairs Attribute
-  t' <- discretizeTable meth (zip attributes (repeat 2))
+  t' <- discretizeTable meth (zip attributes (repeat 1))
+  s' <- get 
+  if verbose s' then liftIO $ putStrLn $ show ( discretizingTable s)
+             else return () 
   let (x,y) = l t' dec 
-  liftIO $ putStrLn $ "First L: " ++ (show (x,y))
+  if verbose s' then liftIO $ putStrLn $ "First L: " ++ (show (x,y))
+             else return ()
   if x == y then return t'
    else do 
     finalTable <- continueDiscretizing meth dec 
-    liftIO $ putStrLn $ "table before merging:\n" ++ (show finalTable)
-    let finalTable' = performPossibleMerges finalTable dec 
-    liftIO $ putStrLn $ "table AFTER merging:\n" ++ (show finalTable')
-    return finalTable
+    if verbose s' then liftIO $ putStrLn $ "table before merging:\n" ++ (show finalTable)
+               else return ()
+    liftIO $ putStrLn $ "merging.."           
+    finalTable' <- liftIO $ performPossibleMerges' finalTable dec 
+    if verbose s' then liftIO $ putStrLn $ "table AFTER merging:\n" ++ (show finalTable')
+               else return ()
+    return finalTable'
     
 continueDiscretizing :: IntervalMethod -> String -> MyStateTMonad Table
 continueDiscretizing meth dec = do     
+ mbest <- maybeGetBest dec
+ case mbest of 
+    Nothing -> do 
+      let str = "Error!! No more cut points left to split any attribute!!"
+      liftIO $ putStrLn str 
+      s <- get 
+      return (case discretizingTable s of 
+                    Nothing -> tableState s
+                    Just t  -> t)
+    (Just best) -> do 
+      s <- get 
+  
+     
+      if verbose s then liftIO $ putStrLn $ "Worst: " ++ (show best) 
+                 else return ()
+      if stops s then liftIO $ getLine
+               else return []
+      t' <- discretizeTablekp1 meth [best] --this updates the kstate as well.
+      --DataMiningState {..} <- get
+      let (x,y) = l t' dec 
+      if verbose s then liftIO $ putStrLn (show (x,y))
+        else return ()
+      if stops s then liftIO $ getLine
+        else return []
+      let p =  round (((fromIntegral x) / (fromIntegral y)) * 100) 
+      liftIO $ putStrLn $ "Percent consistent: " ++ (show p) ++ "%"
+      if x == y then return t'
+                else continueDiscretizing meth dec 
+
+maybeGetBest :: String -> MyStateTMonad (Maybe String)
+maybeGetBest dec = do 
  s <- get 
  let table = case discretizingTable s of 
-                Nothing -> tableState s 
-                Just q  -> q 
- let attributes = extractFromHeaders (tableHeaders table) Attribute               
- let prs = map (\att -> (att, m (length (tableData table)) (map (\is -> (map (\i -> getMVal (tableHeaders table) dec (getRow table i)) is))
+                  Nothing -> tableState s 
+                  Just q  -> q 
+ if verbose s then liftIO $ putStrLn $ "Here is the AttState: " ++ (show (getDomAttState s))
+    else return ()
+ let attributes =map fst $ filter (\(att,attinfo) -> (length (getCuts attinfo)) < (getMaxCuts attinfo))(getDomAttState s) 
+ --extractFromHeaders (tableHeaders table) Attribute 
+ case attributes of 
+    [] -> return Nothing
+    _  -> do 
+      let prs = map (\att -> (att, m (length (tableData table)) (map (\is -> (map (\i -> getMVal (tableHeaders table) dec (getRow table i)) is))
                                                             (compPartG table [att])))) 
                                                               attributes 
+          prs' = nubBy (\a b -> (snd a) == (snd b)) prs 
      --prs = filter (\(att,mvalue) -> case  prs 
-     best = maximumBy (compare `on` snd) prs 
- liftIO $ putStrLn (show prs)     
- liftIO $ putStrLn $ "Worst: " ++ (show best) 
- liftIO $ getLine
- t' <- discretizeTablekp1 meth [fst best] --this updates the kstate as well.
- let (x,y) = l t' dec 
- liftIO $ putStrLn (show (x,y))
- liftIO $ getLine
- if x == y then return t'
-           else continueDiscretizing meth dec 
+          best = fst $ maximumBy (compare `on` snd) prs'           
+      if verbose s then liftIO $ putStrLn $ "Pairs: " ++ (show prs) 
+        else return ()
+      return (Just best)      
+           
 discretizeTablekp1 :: IntervalMethod -> [(String)] -> MyStateTMonad Table
-discretizeTablekp1 meth ls = do
-  s <- get 
-  let kstate = discretizingState s 
-      newls = foldr (\a acc -> case lookup a kstate of
-                                  Nothing             -> acc 
-                                  Just (k,intervals)  -> (a, k +1): acc ) [] ls
-  liftIO $ putStrLn $ "Looking for: " ++ (show (head ls)) ++ " in " ++ (show kstate)
-  discretizeTable meth newls 
+discretizeTablekp1 meth ls = discretizeTable meth (zip ls (repeat 1))  
   
 discretizeTable ::IntervalMethod -> [(String,Int)] -> MyStateTMonad Table  
 discretizeTable meth attkLS  = do 
@@ -326,8 +347,21 @@ discretizeTable meth attkLS  = do
                 Nothing -> origtable
                 Just q  -> q 
                 
-  let attributes = map fst attkLS
-  let columnValsLS = map (\(a,k) -> ((getColumnValsNoMabies' origtable) a,k)) attkLS
+  let attkLS' = foldr (\(a,k) acc -> case lookup a getDomAttState of 
+                                        Nothing -> acc 
+                                        Just (AttInfo {..}) -> let k' = (length getCuts) + k + 1 in 
+                                          if (k' -1) <= getMaxCuts
+                                            then (a,k'):acc 
+                                            else acc) [] attkLS
+  
+  {-filter (\(a,k) -> case lookup a getDomAttState of 
+                                    Nothing -> False
+                                    Just (AttInfo {..}) -> ((length getCuts) + k) <= getMaxCuts ) attkLS
+ -}   
+      attributes = map fst attkLS'
+  if verbose then liftIO $ putStrLn $ "Here are the atts I am about to discretize: " ++ (show attkLS')
+    else return ()
+  let columnValsLS = map (\(a,k) -> (getColumnValsNoMabies' origtable a,k)) attkLS'
   let columnMValsLS = map (extractColumn' origtable) attributes
       allColumnNames = map fst (tableHeaders table)
      
@@ -335,7 +369,7 @@ discretizeTable meth attkLS  = do
       --decisionColumns = map (extractColumn' table) (extractFromHeaders (tableHeaders table) Decision)
    -- oldColumnAndCutPoints :: [([Maybe Value], [(Double,Double)]]    (header,[cutpoints])
       intervalsLS = map (\(als,k) -> (calcIntervals' meth k als)) columnValsLS
-      newAttKIntervalsLS = zip attkLS intervalsLS
+      newAttKIntervalsLS = map (\((a,k),intervals) -> (a,(k,intervals))) (zip attkLS' intervalsLS)
       oldColumnAndCutPoints =zip columnMValsLS intervalsLS
       newColumns = (map (\(old, cuts) -> discretizeColumn old cuts) oldColumnAndCutPoints)
       newColsWithNames = zip attributes newColumns
@@ -344,14 +378,20 @@ discretizeTable meth attkLS  = do
                             Just v  -> v ) allColumnNames
       rows = mytranspose cols
       table' = replaceRows table rows
-      kInfo = discretizingState
-      ksub = filter (\(att,_) -> not(att `elem` attributes)) kInfo 
-      newAdditions = map (\((att,k),intervals) -> (att, (k,intervals))) newAttKIntervalsLS
-      kInfo' = newAdditions ++ ksub 
-  liftIO $ putStrLn $ "new intervals: " ++ (show intervalsLS)
-  put $ DataMiningState { tableState = origtable, discretizingTable = (Just table'), discretizingState= kInfo', ..}
-  liftIO $ putStrLn (show table')
-  liftIO $ getLine
+      kInfo = getDomAttState --discretizingState
+      kInfo' = foldr (\e@(a, AttInfo {..}) acc -> case lookup a newAttKIntervalsLS of 
+                                                Nothing -> e:acc
+                                                Just (k,intervals) -> (a,AttInfo {getCuts =((tail . init) (sort(nub(foldr (\(x,y) acc -> x:y:acc) [] intervals)))), getIntervals = intervals,..}):acc ) [] kInfo
+      --ksub = filter (\(att,_) -> not(att `elem` attributes)) kInfo 
+      --newAdditions = map (\((att,k),intervals) -> (att, (k,intervals))) newAttKIntervalsLS
+      --kInfo' = newAdditions ++ ksub 
+  if verbose then liftIO (do 
+                            putStrLn $ "new intervals: " ++ (show intervalsLS)
+                            putStrLn (show table'))
+    else return ()
+  put $ DataMiningState { tableState = origtable, discretizingTable = (Just table'), getDomAttState= kInfo', ..}
+  if stops then liftIO $ getLine
+    else return []
   return table'
   
 discretizeColumn :: [Maybe Value] -> [(Double,Double)] -> [Maybe Value]  
@@ -504,6 +544,34 @@ chooseDiscMethod = do
   _ -> do 
     putStrLn "INVALID SELECTION.\n"
     chooseDiscMethod
+
+writeFiles :: Table -> IO ()
+writeFiles table = do
+  let headers = tableHeaders table 
+      atts = extractFromHeaders headers Attribute 
+      columns = map (\name -> sort ( nub (getColumnValsNoMabies' table name))) atts 
+      attcols = zip atts columns
+      
+      
+  hIntervalFile <- openFile "test.int"  WriteMode
+  hPutStrLn hIntervalFile "Attributes and their discretized intervals:\n"
+  sequence $ map (\(att,colvals) -> case head colvals of 
+                                     (Interval l h) -> do 
+                                       hPutStrLn hIntervalFile $ att ++ ":\t" ++ (join (intersperse ", " (map show colvals)))
+                                     _  -> return ()) attcols    
+  hClose hIntervalFile
+  
+  hTableFile <- openFile "test.data" WriteMode 
+  let letters = join $ map (\(att,ad) -> if ad == Attribute then "a " else "d " ) headers 
+      firstRow = "< " ++ letters ++ ">"
+      colNames = join (intersperse " " ( map fst headers))
+      secondRow = "[ " ++ colNames ++ " ]"
+      rows = tableData table 
+  hPutStrLn hTableFile firstRow
+  hPutStrLn hTableFile secondRow
+  sequence $ map (\row -> hPutStrLn hTableFile (strRow' row)) rows 
+  hClose hTableFile  
+  return ()    
     
     
     

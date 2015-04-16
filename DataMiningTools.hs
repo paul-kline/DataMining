@@ -10,6 +10,7 @@ import Data.Text (pack, unpack)
 import Text.Read (readMaybe)
 import Control.Monad
 import System.IO.Unsafe
+import Data.Function.Memoize
 runEvaluate ::  String ->IO (Either String (String, DataMiningState))
 runEvaluate fileLoc= do
               eitherTable <- readInTable fileLoc  
@@ -18,13 +19,13 @@ runEvaluate fileLoc= do
                   putStrLn err
                   return (Left err)
                 (Right table) -> do
-                  let s0 =  DataMiningState table Nothing [] []                 
+                  let s0 =  DataMiningState table Nothing [] False False              
                   result <- runStateT (evaluate) s0
                   return $ Right result
 
 runEvaluate' :: Table ->IO (String , DataMiningState)
 runEvaluate' table = do
-   let s0 = DataMiningState table Nothing [] []
+   let s0 = DataMiningState table Nothing [] False False
    runStateT (evaluate) s0
 
 evaluate :: MyStateTMonad String
@@ -431,6 +432,27 @@ performMerge :: Table -> Table
 performMerge table = let allPossibleMerges = 
 -}
 
+performPossibleMerges' :: Table -> String -> IO Table
+performPossibleMerges' table dec = do 
+    let colNames = map fst (tableHeaders table)
+        colVals = map (memoize2 getColumnValsNoMabies' table) colNames
+        pairs = zip colNames colVals 
+        mergables = foldr (\pair acc -> case head (snd pair) of 
+                                           (Interval _ _) -> pair : acc 
+                                           _              -> acc ) [] pairs
+        mergablesSorted = map (\(name,ls) -> (name, sort ls)) mergables
+        merges = join $ map (\(n,vals) -> zip (repeat n) (map (\(v1,v2) -> 
+          case (v1,v2) of 
+            (i1@(Interval l1 h1),i2@(Interval l2 h2)) -> 
+              ((i1,i2),Interval l1 h2)) (zip vals (tail vals)))) mergablesSorted
+         
+  --    xxx = unsafePerformIO $ putStrLn $ "Pairs:\n" ++ (show pairs) ++ "\nMergables:\n" ++ (show mergables) ++ "\nMerges:\n" ++ (show merges)
+    putStrLn $ "Merge attempts left: " ++ (show (length merges))
+    mergedTable <- mergeHelper' table dec merges    
+ -- case xxx of 
+  --  () -> 
+    return $ dropSillyColumns mergedTable 
+  --merges :: [(String, ((Value,Value),Value))]
 performPossibleMerges :: Table ->String -> Table
 performPossibleMerges table dec = let colNames = map fst (tableHeaders table)
                                       colVals = map (getColumnValsNoMabies' table) colNames
@@ -466,7 +488,24 @@ dropSillyColumns table = let headers = tableHeaders table
                                  
                           else table 
                           
-                         
+mergeHelper' :: Table ->String -> [(String,((Value,Value),Value))] -> IO Table
+mergeHelper' table _ [] = return table 
+mergeHelper' table dec ((col1, ((iv1,iv2), niv1@(Interval nl1 nh1))):xs) = do
+  putStrLn $ "Merge attempts remaining: " ++ (show (length xs)) 
+  let t' = mergeValuesInColumn table col1 [Just iv1,Just iv2] (Just niv1)  
+      (x,y) = l t' dec 
+  if x == y 
+    then 
+     if length xs == 0 
+      then return t' 
+      else do 
+           let (col2, (((Interval l1 h1),q@(Interval l2 h2)),(Interval nl2 nh2)))  = head xs  
+           if col2 == col1 then do --we are dealing with the same column, otherwise no changes necessary
+              let e' = (col2, ( (niv1,q), Interval nl1 nh2))
+              mergeHelper' t' dec (e':(tail xs))
+           else mergeHelper' t' dec xs 
+    else
+     mergeHelper' table dec xs                          
 mergeHelper :: Table ->String -> [(String,((Value,Value),Value))] -> Table
 mergeHelper table _ [] = table 
 mergeHelper table dec ((col1, ((iv1,iv2), niv1@(Interval nl1 nh1))):xs) = 
