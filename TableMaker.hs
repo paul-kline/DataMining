@@ -33,7 +33,7 @@ mkTestTable str = do
            --putStrLn ("successfully read in headers: "++ (show headers))
            let numPerRow = length headers
            let typeIndicators = (map (\h -> if (snd h) == Attribute 
-                                                             then DoubleT 
+                                                             then FloatT 
                                                              else StringT) headers)  --special case known for This project.
            let eitherRows = mkRowsLERS typeIndicators (L.words textData) 1
            case eitherRows of 
@@ -74,7 +74,7 @@ askAndCreateTable = do
            --putStrLn ("successfully read in headers: "++ (show headers))
            let numPerRow = length headers
            let typeIndicators = (map (\h -> if (snd h) == Attribute 
-                                                             then DoubleT 
+                                                             then FloatT 
                                                              else StringT) headers)  --special case known for This project.
            let eitherRows = mkRowsLERS typeIndicators (L.words textData) 1
            case eitherRows of 
@@ -136,7 +136,7 @@ mkTableFromLERS (ln1:ln2:lns) = let eitherHeaders = mkHeadersLERS ln2 in
   case eitherHeaders of 
    Left err -> Left err 
    Right headers -> let dat = mkDataLERS (map (\h -> if (snd h) == Attribute 
-                                                             then DoubleT 
+                                                             then FloatT 
                                                              else StringT) headers) lns in 
      Left $ "successfully got headers: " ++(show headers) ++ "Here is the data:\n" ++ (show dat)
 
@@ -180,7 +180,8 @@ getFileName = handle (\(e :: IOException) ->do
                          print e
                          putStrLn $ "In other words, try again!\n"
                          getFileName) $ do
-      putStr $ "\nPlease enter the input data file ('q' to quit): "
+      
+      putStrLn $ "\nPlease enter the input data file ('q' to quit): "
       str <- getLine
       case str of
        "q" -> return Nothing
@@ -188,21 +189,6 @@ getFileName = handle (\(e :: IOException) ->do
        a@_ -> do 
          h <- openFile str ReadMode
          return (Just h)
-         
-         
-         
-         
-         
-         
-         
-         
-         
-         
-         
-         
-         
-         
-         
          
 
 
@@ -289,9 +275,9 @@ mkRow (t:ts) (i,(x:xs)) =
                BoolT   -> (case readMaybe x :: Maybe Bool of
                   Nothing  -> Nothing
                   (Just b) -> (Just (BoolVal b)) )
-               DoubleT -> (case readMaybe x :: Maybe Double of
+               FloatT -> (case readMaybe x :: Maybe Float of
                   Nothing  -> Nothing 
-                  Just d   -> Just (DoubleVal d)) ) 
+                  Just d   -> Just (FloatVal d)) ) 
    in (i,(mVal:(snd (mkRow ts (i,xs)))))
 
                                     

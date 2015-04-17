@@ -1,4 +1,4 @@
-{-#LANGUAGE TypeSynonymInstances, FlexibleInstances, ViewPatterns #-}
+{-#LANGUAGE TypeSynonymInstances, FlexibleInstances, ViewPatterns, TemplateHaskell #-}
 module DataMiningTypes where
 
 import Prelude hiding (id)
@@ -12,6 +12,8 @@ import Data.Function  hiding (id)
 import qualified Data.Text.Lazy as L
 import Text.Printf
 import Data.Function.Memoize
+import Language.Haskell.TH
+
 --import Monad.StateT
 
 type MyStateTMonad a = StateT DataMiningState IO a 
@@ -28,14 +30,14 @@ data DataMiningState = DataMiningState {
                             stops :: Bool
                      } deriving (Show, Eq)
 
-type DiscState = [(String, (Int,[(Double,Double)]) )]
+type DiscState = [(String, (Int,[(Float,Float)]) )]
 type DomAttState = [(String, AttInfo)]
 data AttInfo = AttInfo {
-                 getCuts :: [Double],
-                 getIntervals :: [(Double,Double)],
-                 getPossibleCuts :: [Double],
-                 getAttMinimum :: Double,
-                 getAttMaximum :: Double,
+                 getCuts :: [Float],
+                 getIntervals :: [(Float,Float)],
+                 getPossibleCuts :: [Float],
+                 getAttMinimum :: Float,
+                 getAttMaximum :: Float,
                  getMaxCuts :: Int
                  } deriving (Show, Eq)
 type LEM2Table = [LEM2Row]                  
@@ -50,7 +52,7 @@ data Table = Table {
                tableHeaders    :: [Header],
                tableData       :: [Row]
 } deriving (Eq, Ord)
-
+{-
 instance Enum Table where 
  succ a = a 
  pred a = a 
@@ -59,23 +61,26 @@ instance Enum Table where
  enumFromThen a b = [a,b]
  enumFrom a = [a]
  enumFromTo a b = [a,b]
- enumFromThenTo a b c = [a,b,c]
+ enumFromThenTo a b c = [a,b,c]-}
 
 --instance Memoizable Table where memoize = memoizeFinite
+-- $(deriveMemoizable ''Table)
+-- $(deriveMemoizable ''AttDec)
+instance Memoizable AttDec where memoize = memoizeFinite
 
 instance Show Table where
    show (Table headers dattt) = "Table:\n" ++ "ID\t" ++ (join (intersperse "\t" (map fst headers))) ++ "\n" ++ 
                                 (join (intersperse "\n" (map strRow dattt))) 
 
-type Header = (String,AttDec)
+type Header = (String,AttDec) 
 
 data AttDec = Attribute 
-            | Decision deriving (Eq, Show, Ord)
+            | Decision deriving (Eq, Show, Ord, Enum, Bounded)
  
 data TypeIndicator = IntT
                    | StringT
                    | BoolT 
-                   | DoubleT deriving (Show, Eq, Ord, Read)
+                   | FloatT deriving (Show, Eq, Ord, Read)
                    
 type Row = (Int, [Maybe Value]) --deriving (Bounded)
 id :: Row -> Int
@@ -93,13 +98,16 @@ strRow' (i,row) = (join (intersperse "\t" (map (\mval -> case mval of
 data Value = StrVal String
            | IntVal Int 
            | BoolVal Bool 
-           | DoubleVal Double 
-           | Interval Double Double deriving (Eq, Ord)
+           | FloatVal Float 
+           | Interval Float Float deriving (Eq, Ord)
+
+
+
 instance Show Value where
    show (IntVal i) = show i
    show (StrVal str) = str 
    show (BoolVal b) = show b
-   show (DoubleVal d) = printf "%.2f" d
+   show (FloatVal d) = printf "%.2f" d
    show (Interval dlow dhigh) = (printf "%.3f" dlow) ++ ".." ++ (printf "%.3f" dhigh)   
 data Rule = Rule [(String,Value)] (String,Value)
 
@@ -121,3 +129,4 @@ dat = [[ "big", "yellow", "soft", "low", "positive"],
        [ "medium", "blue", "soft", "low", "negative"],
        [ "big", "blue", "hard", "low", "so-so"],
        [ "big", "blue", "hard", "high", "so-so"] ]  
+    

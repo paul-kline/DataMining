@@ -27,7 +27,7 @@ main = do
      putStrLn err 
      putStrLn "Exiting"
     Right table -> do 
-     putStrLn (show table)
+   --  putStrLn (show table)
      putStrLn "Your file is acceptable." 
      mmethod <- chooseDiscMethod
      case mmethod of 
@@ -36,7 +36,7 @@ main = do
        return ()
       Just m -> do
        --putStrLn $ "Method: " ++ (show m)
-       let s0 = DataMiningState table Nothing [] False False
+       let s0 = DataMiningState table Nothing [] False True
        let dec = head $ extractFromHeaders ( tableHeaders table ) Decision         
        case m of 
         'a' -> do 
@@ -83,7 +83,7 @@ stateStarter dec = do
   let headerPairs = tableHeaders tableState
       attributes = extractFromHeaders headerPairs Attribute
       att_PosCuts_min_maxLS = map (\att -> let vals =getColumnValsNoMabies' tableState att
-                                               numbers = sort . nub $ toDoubles vals 
+                                               numbers = sort . nub $ toFloats vals 
                                                min = minimum numbers 
                                                max = maximum numbers
                                                in 
@@ -92,7 +92,7 @@ stateStarter dec = do
   put $ DataMiningState {getDomAttState = domattState, ..}
   return () 
   
-calcPossibleCuts :: [Double] -> [Double]
+calcPossibleCuts :: [Float] -> [Float]
 calcPossibleCuts doubls = map (\(x,y) -> ( x + y ) /2 ) (zip doubls (tail doubls))
 
 dominantAttribute :: String -> MyStateTMonad Table 
@@ -201,7 +201,7 @@ constructTableFromDomAttState dec = do
              else return ()
   return (Table headers rows')
   
-experimentWithCutPoints :: String ->String -> Double ->MyStateTMonad Double
+experimentWithCutPoints :: String ->String -> Float ->MyStateTMonad Float
 experimentWithCutPoints att dec cp = do 
   DataMiningState {..} <- get 
   let curTable = case discretizingTable of 
@@ -221,7 +221,7 @@ experimentWithCutPoints att dec cp = do
                              in 
                          Table subTableHeaders' subTableRows' 
       colMVals = extractColumn' curTable' att
-      numbers = toDoubles (noMaybies colMVals)
+      numbers = toFloats (noMaybies colMVals)
       min = minimum numbers
       max = maximum numbers 
       discretizedCol = discretizeColumn colMVals [(min,cp),(cp,max)]
@@ -231,7 +231,7 @@ experimentWithCutPoints att dec cp = do
       decValPartition =map (\ls -> map (\i -> getMVal experimentalHeaders dec (findRWithID (tableData experimentalTable) i)) ls) attributePartition
   return $ h decValPartition
   
-getBestAttwCutChoices :: [(String,Double)] -> MyStateTMonad (Maybe (String,[Double]))
+getBestAttwCutChoices :: [(String,Float)] -> MyStateTMonad (Maybe (String,[Float]))
 getBestAttwCutChoices [] = return Nothing 
 getBestAttwCutChoices attHValPairs = do
   DataMiningState {..} <- get 
@@ -243,7 +243,7 @@ getBestAttwCutChoices attHValPairs = do
     [] -> getBestAttwCutChoices (delete bestPair attHValPairs)
     _  -> return (Just (fst bestPair, posscuts))
     
-domAttWithCut :: String -> String ->[Double] -> Double ->Int -> MyStateTMonad Double 
+domAttWithCut :: String -> String ->[Float] -> Float ->Int -> MyStateTMonad Float 
 domAttWithCut att dec uniquesSorted cp maxCuts = do
   DataMiningState {..} <- get
   let origTable = tableState     
@@ -261,6 +261,7 @@ domAttWithCut att dec uniquesSorted cp maxCuts = do
 performIntervalDisc :: IntervalMethod -> String -> MyStateTMonad Table 
 performIntervalDisc meth dec = do 
   s <- get
+  liftIO $ putStrLn "eifjeifjeifjeifjeifeifj"
   let table = tableState s 
       headerPairs = tableHeaders table
       attributes = extractFromHeaders headerPairs Attribute
@@ -271,8 +272,10 @@ performIntervalDisc meth dec = do
   let (x,y) = l t' dec 
   if verbose s' then liftIO $ putStrLn $ "First L: " ++ (show (x,y))
              else return ()
+  liftIO $ putStrLn $ "hellloooooooooooooooo"
   if x == y then return t'
    else do 
+    liftIO $ putStrLn $ "about to start continueDiscretizing"
     finalTable <- continueDiscretizing meth dec 
     if verbose s' then liftIO $ putStrLn $ "table before merging:\n" ++ (show finalTable)
                else return ()
@@ -283,7 +286,8 @@ performIntervalDisc meth dec = do
     return finalTable'
     
 continueDiscretizing :: IntervalMethod -> String -> MyStateTMonad Table
-continueDiscretizing meth dec = do     
+continueDiscretizing meth dec = do  
+ liftIO $ putStrLn "continueDiscretizing"
  mbest <- maybeGetBest dec
  case mbest of 
     Nothing -> do 
@@ -309,7 +313,10 @@ continueDiscretizing meth dec = do
       if stops s then liftIO $ getLine
         else return []
       let p =  round (((fromIntegral x) / (fromIntegral y)) * 100) 
-      liftIO $ putStrLn $ "Percent consistent: " ++ (show p) ++ "%"
+      fff <- liftIO $ putStrLn $ "Percent consistent: " ++ (show p) ++ "%"
+      liftIO $ hFlush stdout
+      case fff of 
+         () -> return ()
       if x == y then return t'
                 else continueDiscretizing meth dec 
 
@@ -341,12 +348,13 @@ discretizeTablekp1 meth ls = discretizeTable meth (zip ls (repeat 1))
   
 discretizeTable ::IntervalMethod -> [(String,Int)] -> MyStateTMonad Table  
 discretizeTable meth attkLS  = do 
+  liftIO $ putStrLn "In descretizeTable.."
   DataMiningState {..} <- get
   let origtable = tableState
   let table = case discretizingTable of 
                 Nothing -> origtable
                 Just q  -> q 
-                
+  liftIO $ putStrLn "In descretizeTable a little further.."              
   let attkLS' = foldr (\(a,k) acc -> case lookup a getDomAttState of 
                                         Nothing -> acc 
                                         Just (AttInfo {..}) -> let k' = (length getCuts) + k + 1 in 
@@ -361,13 +369,14 @@ discretizeTable meth attkLS  = do
       attributes = map fst attkLS'
   if verbose then liftIO $ putStrLn $ "Here are the atts I am about to discretize: " ++ (show attkLS')
     else return ()
+  liftIO $ putStrLn "In descretizeTable a little further about to get noMaybies.."  
   let columnValsLS = map (\(a,k) -> (getColumnValsNoMabies' origtable a,k)) attkLS'
   let columnMValsLS = map (extractColumn' origtable) attributes
       allColumnNames = map fst (tableHeaders table)
      
-      -- : [ [(Int,Double)] ] 
+      -- : [ [(Int,Float)] ] 
       --decisionColumns = map (extractColumn' table) (extractFromHeaders (tableHeaders table) Decision)
-   -- oldColumnAndCutPoints :: [([Maybe Value], [(Double,Double)]]    (header,[cutpoints])
+   -- oldColumnAndCutPoints :: [([Maybe Value], [(Float,Float)]]    (header,[cutpoints])
       intervalsLS = map (\(als,k) -> (calcIntervals' meth k als)) columnValsLS
       newAttKIntervalsLS = map (\((a,k),intervals) -> (a,(k,intervals))) (zip attkLS' intervalsLS)
       oldColumnAndCutPoints =zip columnMValsLS intervalsLS
@@ -385,8 +394,8 @@ discretizeTable meth attkLS  = do
       --ksub = filter (\(att,_) -> not(att `elem` attributes)) kInfo 
       --newAdditions = map (\((att,k),intervals) -> (att, (k,intervals))) newAttKIntervalsLS
       --kInfo' = newAdditions ++ ksub 
-  if verbose then liftIO (do 
-                            putStrLn $ "new intervals: " ++ (show intervalsLS)
+  if verbose || True then liftIO (do 
+                            putStrLn $ "new intervals: " ++ (show (length intervalsLS))
                             putStrLn (show table'))
     else return ()
   put $ DataMiningState { tableState = origtable, discretizingTable = (Just table'), getDomAttState= kInfo', ..}
@@ -394,39 +403,39 @@ discretizeTable meth attkLS  = do
     else return []
   return table'
   
-discretizeColumn :: [Maybe Value] -> [(Double,Double)] -> [Maybe Value]  
+discretizeColumn :: [Maybe Value] -> [(Float,Float)] -> [Maybe Value]  
 discretizeColumn [] _ = []
 discretizeColumn a@((Just (StrVal _)):_) _  =  a 
 discretizeColumn a@((Just (BoolVal _)):_) _ =  a
 discretizeColumn column intervals = map (categorize intervals) column 
 
-categorize :: [(Double,Double)] -> Maybe Value -> Maybe Value 
-categorize intervals (Just (DoubleVal d))  =   let mInterval = find (\pair -> d >= (fst pair) && d <= (snd pair)) intervals in 
+categorize :: [(Float,Float)] -> Maybe Value -> Maybe Value 
+categorize intervals (Just (FloatVal d))  =   let mInterval = find (\pair -> d >= (fst pair) && d <= (snd pair)) intervals in 
                                         case mInterval of 
                                            Nothing -> Just $ StrVal "ERROR"
                                            Just i  ->Just $ Interval (fst i) (snd i)
-categorize intervals (Just (IntVal i)) = categorize intervals (Just (DoubleVal (fromIntegral i)))
+categorize intervals (Just (IntVal i)) = categorize intervals (Just (FloatVal (fromIntegral i)))
 categorize _ a@_ = a 
                                            
-calcIntervals :: IntervalMethod -> Int -> [Maybe Value] -> [(Double,Double)]
+calcIntervals :: IntervalMethod -> Int -> [Maybe Value] -> [(Float,Float)]
 calcIntervals meth x ls = calcIntervals' meth x (noMaybies ls)
 
-calcIntervals' :: IntervalMethod -> Int -> [Value] -> [(Double,Double)]
+calcIntervals' :: IntervalMethod -> Int -> [Value] -> [(Float,Float)]
 calcIntervals' EqualWidth = calcEqualWidthIntervals
 calcIntervals' EqualFrequency = calcEqualFrequencyIntervals
 
-toDoubles :: [Value] -> [Double]
-toDoubles ((StrVal _):_) = []
-toDoubles ((BoolVal _):_) = []
-toDoubles ls = foldr (\x acc -> case x of 
-                                       (DoubleVal d) -> d : acc  
+toFloats :: [Value] -> [Float]
+toFloats ((StrVal _):_) = []
+toFloats ((BoolVal _):_) = []
+toFloats ls = foldr (\x acc -> case x of 
+                                       (FloatVal d) -> d : acc  
                                        (IntVal i   ) -> (fromIntegral i):acc ) [] ls
 
-calcEqualFrequencyIntervals :: Int -> [Value] -> [(Double,Double)]
+calcEqualFrequencyIntervals :: Int -> [Value] -> [(Float,Float)]
 calcEqualFrequencyIntervals _ ((StrVal _):_) = []
 calcEqualFrequencyIntervals _ ((BoolVal _):_) = []
 calcEqualFrequencyIntervals n ls = let ls' = foldr (\x acc -> case x of 
-                                                               (DoubleVal d) -> d : acc  
+                                                               (FloatVal d) -> d : acc  
                                                                (IntVal i   ) -> (fromIntegral i):acc ) [] ls
                                        intervals = (calcEqualFrequencyIntervalshelper n ls')
                                        adjacents = zip intervals (tail intervals)
@@ -483,7 +492,7 @@ equalFrequencyHelper n xs | n >= (length xs) = map listify xs
                               adjust i ls = if (length (drop i ls)) < (n -1)
                                               then adjust (i -1) ls 
                                               else i 
-calcEqualWidthIntervals' :: Int -> [Maybe Value] -> [(Double,Double)]
+calcEqualWidthIntervals' :: Int -> [Maybe Value] -> [(Float,Float)]
 calcEqualWidthIntervals' n ls = calcEqualWidthIntervals n (noMaybies ls)
 
 listify :: a -> [a]
@@ -500,7 +509,7 @@ toList ((x,i):xs) = (take i (repeat x)) ++ (toList xs)
 sumBy ::(Num b) => (a -> b) -> [a] -> b 
 sumBy f ls = foldr (\x acc -> (f x) + acc) 0 ls 
                                             
-calcEqualWidthIntervals :: Int -> [Value] -> [(Double,Double)]
+calcEqualWidthIntervals :: Int -> [Value] -> [(Float,Float)]
 calcEqualWidthIntervals numintervals columnvals = do 
   if length columnvals == 0 then []
   else do
@@ -508,16 +517,16 @@ calcEqualWidthIntervals numintervals columnvals = do
          (StrVal _)     -> Nothing 
          (BoolVal _)    -> Nothing
          (IntVal i)     -> (Just (fromIntegral i))
-         (DoubleVal d)  -> Just d)
+         (FloatVal d)  -> Just d)
     case mv of 
       Nothing -> []
       Just v  -> do 
          let max = case maximum columnvals of 
                      IntVal i -> fromIntegral i
-                     DoubleVal d -> d 
+                     FloatVal d -> d 
              min = case minimum columnvals of
                      IntVal i -> fromIntegral i 
-                     DoubleVal d -> d              
+                     FloatVal d -> d              
          let width = (max - min)/((fromIntegral numintervals))
          map (\(x,y) -> ((min + (fromIntegral x)*width),(min + (fromIntegral y)*width))) (zip [0..numintervals] [1..numintervals])
 chooseDiscMethod :: IO (Maybe Char)
