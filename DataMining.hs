@@ -1,5 +1,5 @@
 {-#LANGUAGE ScopedTypeVariables, OverloadedStrings, RecordWildCards #-}
-module DataMining where
+module Main where
 
 import System.IO
 import DataMiningTypes hiding (evaluate)
@@ -43,7 +43,7 @@ main = do
          (unit,s1) <- runStateT (stateStarter dec) s0 
          liftIO $ putStrLn $ "Beginning equal width discretization.."
          (t,s) <- runStateT (performIntervalDisc EqualWidth dec) s1 
-         putStr $ show t
+         --putStr $ show t
          --(unit,s') <- runStateT (writeFiles 'a' t) s 
          writeFiles t
          return ()
@@ -51,7 +51,7 @@ main = do
          (unit,s1) <- runStateT (stateStarter dec) s0 
          liftIO $ putStrLn $ "Beginning equal frequency discretization.."
          (t,s) <- runStateT (performIntervalDisc EqualFrequency dec) s1 
-         putStr $ show t
+         --putStr $ show t
          --(unit,s') <- runStateT (writeFiles 'b' t) s 
          writeFiles t
          return ()
@@ -73,7 +73,7 @@ main = do
          --(unit,s') <- runStateT (writeFiles 'c' t'') s 
          writeFiles t''
          return ()
-
+     putStrLn "Complete!"
 
   
 stateStarter ::String -> MyStateTMonad ()

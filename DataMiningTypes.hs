@@ -49,8 +49,8 @@ data LEM2Row = LEM2Row {
 data Table = Table {
                tableHeaders    :: [Header],
                tableData       :: [Row]
-} deriving (Eq, Ord, Bounded)
-{-
+} deriving (Eq, Ord)
+
 instance Enum Table where 
  succ a = a 
  pred a = a 
@@ -60,8 +60,8 @@ instance Enum Table where
  enumFrom a = [a]
  enumFromTo a b = [a,b]
  enumFromThenTo a b c = [a,b,c]
- -}
-instance Memoizable Table where memoize = memoizeFinite
+
+--instance Memoizable Table where memoize = memoizeFinite
 
 instance Show Table where
    show (Table headers dattt) = "Table:\n" ++ "ID\t" ++ (join (intersperse "\t" (map fst headers))) ++ "\n" ++ 

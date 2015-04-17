@@ -435,7 +435,7 @@ performMerge table = let allPossibleMerges =
 performPossibleMerges' :: Table -> String -> IO Table
 performPossibleMerges' table dec = do 
     let colNames = map fst (tableHeaders table)
-        colVals = map (memoize2 getColumnValsNoMabies' table) colNames
+        colVals = map ( getColumnValsNoMabies' table) colNames
         pairs = zip colNames colVals 
         mergables = foldr (\pair acc -> case head (snd pair) of 
                                            (Interval _ _) -> pair : acc 
@@ -451,6 +451,9 @@ performPossibleMerges' table dec = do
     mergedTable <- mergeHelper' table dec merges    
  -- case xxx of 
   --  () -> 
+    
+   -- liftIO $ putStrLn $ "table before dropSillyColumns: " ++ (show mergedTable)
+    --liftIO $ putStrLn $ "That was the before merged tables!!"
     return $ dropSillyColumns mergedTable 
   --merges :: [(String, ((Value,Value),Value))]
 performPossibleMerges :: Table ->String -> Table
@@ -483,7 +486,7 @@ dropSillyColumns table = let headers = tableHeaders table
                           then 
                              let headers' = filter (\(str,ad) -> not ( str `elem` attsToRemove)) headers 
                                  colLS' = foldr (\(att,colvals) acc -> if (att `elem` attsToRemove) then acc else colvals:acc ) [] pairs
-                                 newRows = mytranspose colLS' in 
+                                 newRows = mytranspose (colLS' ++ (map (extractColumn' table) (extractFromHeaders headers Decision))) in 
                              Table headers' newRows
                                  
                           else table 
