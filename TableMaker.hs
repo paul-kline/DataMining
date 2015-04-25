@@ -10,8 +10,10 @@ import Data.Char
 import Control.Monad
 import qualified Data.Text as Text
 import Text.Read
-t1IO = mkTestTable "lers1.txt"
-
+import qualified Data.Map as M
+t1IO = mkTestTable "m-echo.txt"
+lers1IO = mkTestTable "lers1.txt"
+t2IO = mkTestTable "common_combined_lers.txt"
 mkTestTable str = do 
        h <- openFile str ReadMode
        c <- LIO.hGetContents h 

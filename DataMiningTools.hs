@@ -1,3 +1,4 @@
+{-#LANGUAGE RecordWildCards #-}
 module DataMiningTools where
 
 import DataMiningTypes
@@ -11,6 +12,8 @@ import Text.Read (readMaybe)
 import Control.Monad
 import System.IO.Unsafe
 import Data.Function.Memoize
+import qualified Data.Map as M
+import qualified Data.Set as S
 runEvaluate ::  String ->IO (Either String (String, DataMiningState))
 runEvaluate fileLoc= do
               eitherTable <- readInTable fileLoc  
@@ -187,6 +190,12 @@ extractColumn' :: Table -> String -> [Maybe Value]
 extractColumn' table header = let headerPairs = tableHeaders table in
   let rows = tableData table in
   map (getMVal headerPairs header) rows  
+
+extractColumn2' :: Table2 -> Header -> M.Map Int Value
+extractColumn2' t2 header = (tableColumns2 t2) M.! header 
+
+extractColumn2Nubs' :: Table2 -> Header -> S.Set Value 
+extractColumn2Nubs' t2 header = (tableNubColumns t2) M.! header
   
 getColumnValsNoMabies :: String -> MyStateTMonad [Value]
 getColumnValsNoMabies header = do
@@ -201,6 +210,7 @@ getColumnValsNoMabies' table header =
   foldr (\r acc -> case getMVal headerPairs header r of 
                             Nothing -> acc
                             Just v  -> v : acc) [] rows                                  
+
                             
 getUniqueValuesFor :: String -> MyStateTMonad [Maybe Value]
 getUniqueValuesFor header = do
@@ -265,8 +275,29 @@ joinPartsNotContainingID :: Int -> [[Int]] -> [Int]
 joinPartsNotContainingID _ [] = []
 joinPartsNotContainingID i (x:xs) = if i `elem` x then (joinPartsNotContainingID i xs)
                                                   else x ++ (joinPartsNotContainingID i xs)                    
-                    
-                    
+compPartG2 :: Table2 -> S.Set Header -> S.Set (S.Set Int)
+compPartG2 t2 =  compPartG2' (tableColumns2 t2) 
+
+{- let rowMap = tableData2 t2  -- :: M.Map Int (M.Map Header Value)
+                            reducedRows = M.map (\m -> M.filterWithKey (\h v ->(h `S.member` headers)) m) rowMap
+                            part =S.fromList $ M.elems $ 
+                                           M.foldrWithKey (\i m acc -> let f = (\k v -> if k == m then Just (S.insert i v) else Nothing)  
+                                                                           (madd,acc') = M.updateLookupWithKey f m acc
+                                                                            in
+                                                                       case madd of 
+                                                                         Just _ -> acc' 
+                                                                         Nothing ->M.insert m (S.singleton i) acc) M.empty reducedRows -- ((M.Map Header Value), (S.Set Int))
+                            in 
+                        part
+                        -}
+--this method does not rely on the rows!!                        
+compPartG2' :: M.Map Header (M.Map Int Value) -> S.Set Header -> S.Set (S.Set Int)
+compPartG2' columns headerSet = let numEntries = (M.size . snd) (M.elemAt 0 columns )
+                                    x = foldr (\i acc -> let row = S.foldr (\h ac -> S.insert ((columns M.! h) M.! i) ac) S.empty headerSet 
+                                                             f Nothing = Just (S.singleton i)
+                                                             f (Just s) = Just (S.insert i s) in 
+                                                         M.alter f row acc ) M.empty [1..numEntries] in 
+                                (S.fromList . M.elems) x
 compPartG :: Table -> [String] -> [[Int]]
 compPartG table fs = compPartG' table (tableData table) (tableHeaders table) fs []
                                  --extractor
@@ -299,8 +330,16 @@ findID :: [Row] -> Int -> Row
 findID (x:xs) i = if i == (id x) then x
                                else findID xs i
 -}
-
-    
+lookupClosest :: (Ord a, Num a) => a -> S.Set a -> Maybe a
+lookupClosest x set = case (S.lookupGE x set, S.lookupLE x set) of 
+                        (Nothing, Just y) -> Just y 
+                        (Just y, Nothing) -> Just y 
+                        (Nothing, Nothing) -> Nothing
+                        (Just y1, Just y2) -> if (abs (y1 - x)) < (abs (y2 - x)) then Just y1 else Just y2
+lookupClosest' :: (Ord a, Num a) => a -> S.Set a -> a
+lookupClosest' x set = case lookupClosest x set of 
+                        Nothing -> x 
+                        Just y  -> y 
 getMVal :: [Header] -> String -> Row -> Maybe Value
 getMVal headers str row  = let mPos = getPosition headers str in
                              case mPos of
@@ -393,6 +432,17 @@ l table dec = let allatts = extractFromHeaders (tableHeaders table) Attribute in
     () ->    
      (sum (map (length . lowerApprox table dec allatts) decBlocks), length (tableData table)) 
 
+l2 :: Table2 -> Header -> (Int,Int)
+l2 t2 = l2' (tableColumns2 t2)
+
+l2' :: M.Map Header (M.Map Int Value) -> Header -> (Int,Int)
+l2' columns dec = let decBlocks = compPartG2' columns (S.singleton dec)  
+                      headers = M.keysSet columns 
+                      attHeaders = S.filter (\(_,y) -> y == Attribute) headers 
+                      numEntries = (M.size . snd) (M.elemAt 0 columns)
+                      x = S.foldr (\s acc -> ((S.size . (lowerApprox2' columns dec attHeaders)) s) + acc ) 0 decBlocks
+                    in 
+                (x, numEntries)
 isConsistent :: Table -> String -> Bool
 isConsistent t dec = let (x,y) = l t dec in 
                         x == y
@@ -413,9 +463,13 @@ e :: (Floating b, Eq a ) => [a] -> b
 e ls = let uniques = nub ls in 
   foldr (\x acc -> let f = ((fromIntegral (length (filter (==x) ls)))/ (fromIntegral (length ls))) in 
                     (-f)*(logBase 2 f) + acc) 0 uniques  
+
 m ::(Eq a, Floating b) => Int -> [[a]] -> b 
 m u lsls = (sum $ map (\block -> ((fromIntegral (length block))/(fromIntegral u))*
                             (e block)) lsls )/ (fromIntegral (length lsls))
+                            
+
+                                                        
 --  -} 
 --table, decisionColumn, attributes, set, answer
 lowerApprox :: Table -> String -> [String] -> [Int] -> [Int]
@@ -423,6 +477,17 @@ lowerApprox table dec atts set = let a = compPartG table atts in
                                     foldr (\s acc -> if s `isSubSet` set 
                                                         then s ++ acc
                                                         else acc) [] a 
+                                                        
+lowerApprox2 :: Table2 -> Header -> S.Set Header -> S.Set Int -> S.Set Int 
+lowerApprox2 t2 = lowerApprox2' (tableColumns2 t2)
+
+type Columns = M.Map Header (M.Map Int Value)                                                        
+lowerApprox2' :: Columns -> Header -> S.Set Header -> S.Set Int -> S.Set Int
+lowerApprox2' cols dec atts set = let a = compPartG2' cols atts in 
+                                     S.foldr (\s acc -> if s `S.isSubsetOf` set 
+                                                        then S.union s acc 
+                                                        else acc) S.empty a 
+                                                        
 upperApprox :: Table -> String -> [String] -> [Int] -> [Int]
 upperApprox table dec atts set = let a = compPartG table atts in
     sort . nub $ foldr (\s acc -> (join (filter (s `elem`) a)) ++ acc) [] set
@@ -490,7 +555,77 @@ dropSillyColumns table = let headers = tableHeaders table
                              Table headers' newRows
                                  
                           else table 
-                          
+dropSillyColumns2 :: Table2 -> Table2 
+dropSillyColumns2 t2 = let columnMaps = tableColumns2 t2 
+                           colHeaders = M.keysSet columnMaps 
+                           atts = S.filter (\(_,y) -> y == Attribute) colHeaders
+                           newNubs = M.foldrWithKey (\header oldCol acc -> let nubs = nubify oldCol
+                                                                               f _ = Just nubs in
+                                                                           M.alter f header acc) (tableNubColumns t2) columnMaps 
+                           newcols = M.filterWithKey (\header a -> (S.size (newNubs M.! header)) > 1) columnMaps
+                           in 
+                       let Table2 {..} = t2 in Table2 {tableColumns2 = newcols, tableNubColumns = newNubs, ..}
+performPossibleMerges2 :: Table2 -> Header ->IO Table2 
+performPossibleMerges2 t2 dec = do let columnMaps = tableColumns2 t2 
+                                       colHeaders = M.keysSet columnMaps 
+                                       atts = S.filter (\(_,y) -> y == Attribute) colHeaders
+                                       newNubs = M.foldrWithKey (\header oldCol acc -> let nubs = nubify oldCol
+                                                                                           f _ = Just nubs in
+                                                                                           M.alter f header acc) (tableNubColumns t2) columnMaps 
+                                       newcols = M.filterWithKey (\header a -> (S.size (newNubs M.! header)) > 1) columnMaps
+                                   
+                                   let Table2 {..} = t2
+                                       nubbedOutTable = Table2 {tableColumns2 = newcols, tableNubColumns = newNubs, ..}
+                                       mapOfColumnSetMerges= M.map (\colNubsSet -> 
+                                                                   let (min,s2) = S.deleteFindMin colNubsSet
+                                                                       (max, set) = S.foldl (\(vprev,acc) v -> (v,(vprev,v):acc)) (min,[] ) s2  
+                                                                         in 
+                                                                     set
+                                                                     ) newNubs 
+                                       
+                                   performPossibleMerges2Helper nubbedOutTable dec mapOfColumnSetMerges
+performPossibleMerges2Helper :: Table2 ->Header -> M.Map Header  [(Value,Value)] ->IO Table2
+performPossibleMerges2Helper t2 dec headerMergesMap = do 
+                                                      let g = M.keysSet headerMergesMap -- tableHeaders t2 
+                                                          relevantOrderedHMap =  M.filter (\a -> S.member a g && ((snd a) == Attribute)) (tableHeaders2 t2)
+                                                          cols = M.foldl (\acc h -> 
+                                                                            let unit = unsafePerformIO $ putStrLn $ "merging: " ++ (fst h) ++ "\n" in 
+                                                                            case unit of 
+                                                                              () ->
+                                                                                M.insert h (mergeColumn2 t2 dec h (headerMergesMap M.! h)) acc ) M.empty relevantOrderedHMap
+                                                       
+                                                      let Table2 {..} = t2 in return $ Table2 {tableColumns2 = cols, ..}
+                                                      
+mergeColumn2 :: Table2 -> Header -> Header -> [(Value,Value)] ->(M.Map Int Value)
+mergeColumn2 t2 dec h [] = ((tableColumns2 t2) M.! h)
+mergeColumn2 t2 dec h merges =    let (minpair:s) = merges 
+                                      columnMap = (tableColumns2 t2) M.! h 
+                                      (mergedV,columnMap') = mergeColumn2helper columnMap minpair
+                                      f _ = Just columnMap'
+                                      origcolums = tableColumns2 t2 
+                                      columns' = M.alter f h origcolums
+                                      (x,y) = l2' columns' dec 
+                                      in 
+                                  let Table2 {..} = t2 in
+                                  let t2' = Table2 {tableColumns2 = columns',..}
+                                      in 
+                                  if x == y then mergeColumn2 t2' dec h (case s of 
+                                                                          [] -> s
+                                                                          _  -> let (q,w) = head s in (mergedV,q):s )
+                                            else mergeColumn2 t2 dec h s 
+mergeColumn2helper :: M.Map Int Value -> (Value,Value) -> (Value, M.Map Int Value)
+mergeColumn2helper colMap (v1,v2) = let ls = case v1 of 
+                                              (FloatVal x) -> [x]
+                                              (Interval x y) -> [x,y]
+                                        ls' = ls ++ (case v2 of 
+                                                        (FloatVal x) -> [x]
+                                                        (Interval x y) -> [x,y])
+                                        mergedV = Interval (minimum ls') (maximum ls')
+                                        in 
+                                   (mergedV, M.map (\v -> if v == v1 || v == v2 then mergedV else v) colMap )
+--performPossibleMerges2 t2 = let                       
+nubify :: (Ord a) => M.Map k a -> S.Set a 
+nubify = M.foldr (\a acc -> S.insert a acc) S.empty                             
 mergeHelper' :: Table ->String -> [(String,((Value,Value),Value))] -> IO Table
 mergeHelper' table _ [] = return table 
 mergeHelper' table dec ((col1, ((iv1,iv2), niv1@(Interval nl1 nh1))):xs) = do
